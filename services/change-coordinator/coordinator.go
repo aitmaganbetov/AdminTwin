@@ -75,8 +75,8 @@ type ChangeRequest struct {
 	idemHash string
 	// awaitingWindow — отложено до maintenance window; только такие change запускает Tick.
 	awaitingWindow bool
-	fence    uint64
-	cancel   context.CancelFunc
+	fence          uint64
+	cancel         context.CancelFunc
 }
 
 // ProposeInput — запрос на изменение (человек или propose-tool агента).

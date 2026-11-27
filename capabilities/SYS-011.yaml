@@ -1,0 +1,21 @@
+capability_id: SYS-011
+version: 1.0.0
+domain: system_administration
+name: Monitoring — CPU, RAM, disk, I/O, процессы, службы, журналы
+tier: MVP
+mode: build
+owner_agent: linux-admin
+supporting_agents: [ai-commander, devops-engineer]
+standards: [STD-19]
+operations:
+  - {level: observe,  tool: metrics.query}
+  - {level: observe,  tool: events.list}
+  - {level: diagnose, tool: logs.search}
+asset_types: [linux_host, docker_host]
+preconditions: [asset_verified]
+risk: low
+autonomy_ceiling: observer
+approval_policy: none_read_only
+evidence_schema: [sli_baseline]
+tests: [T-TENANT-001]
+lifecycle_state: in_development

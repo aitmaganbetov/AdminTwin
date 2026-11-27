@@ -1,0 +1,44 @@
+# ТЗ §11.3 (MVP runbooks): allowlist служб; rollback none + compensation.
+id: linux.service.restart
+version: 1.0.0
+title: Перезапуск службы systemd
+risk: low
+change_type_default: standard
+scope:
+  - asset_type: linux_host
+modes_allowed: [operator, autonomous]
+parameters:
+  unit:
+    type: string
+    # allowlist служб; дополнительно unit должен существовать на целевом хосте
+    enum: [nginx.service, docker.service, postgresql.service, redis-server.service, php-fpm.service, apache2.service]
+    source: asset_inventory
+    kind: systemd_unit
+preflight:
+  - check: asset_verified
+  - check: environment_matches_policy
+  - check: legal_hold_absent
+  - check: unit_exists
+  - check: not_in_protected_list
+  - check: restart_count_last_hour_lt
+    args: {limit: 3}
+execute:
+  engine: ssh_argv                   # argv без shell; подстановка только целым элементом
+  action: systemctl_restart
+  argv: [systemctl, restart, "{{unit}}"]
+  timeout_s: 90
+post_check:
+  - check: unit_active
+  - check: health_endpoint_ok
+    if_defined: true
+rollback: none
+compensation:
+  - action: notify_service_owner
+  - action: escalate_incident_severity
+    when: post_check_failed
+side_effects: [service_downtime_during_restart, active_connections_dropped]
+rate_limit: 3/hour/asset
+owner: platform-team
+certified_by: [tenant_admin]
+tests:
+  - services/execution-gateway/gateway_test.go

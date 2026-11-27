@@ -1,0 +1,42 @@
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: admintwin_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: lint
+        run: make lint
+      - name: unit + e2e (race)
+        run: make test-race
+      - name: RLS isolation on PostgreSQL (T-TENANT-001)
+        env:
+          ADMINTWIN_TEST_DATABASE_URL: postgres://postgres:ci-only@localhost:5432/admintwin_test?sslmode=disable
+        run: make test-db
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.3 ./...
+  ai:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: ruff + pytest (offline; no real LLM calls)
+        run: make ai-test

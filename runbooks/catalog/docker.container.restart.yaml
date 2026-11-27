@@ -1,0 +1,45 @@
+# ТЗ §11.3 — эталонная спецификация runbook. Версия заморожена после сертификации.
+id: docker.container.restart
+version: 1.3.0
+title: Перезапуск Docker-контейнера
+risk: low
+change_type_default: standard        # auto_ok в режиме Operator/Autonomous
+scope:
+  - asset_type: docker_host
+modes_allowed: [operator, autonomous]
+parameters:
+  container_id:
+    type: string
+    pattern: "^[a-f0-9]{12,64}$"
+    source: asset_inventory          # должен существовать в CMDB tenant
+    kind: container
+preflight:
+  - check: asset_verified
+  - check: environment_matches_policy
+  - check: legal_hold_absent
+  - check: container_exists
+  - check: not_in_protected_list
+  - check: restart_count_last_hour_lt
+    args: {limit: 3}
+execute:
+  engine: docker_api                 # не shell
+  action: restart
+  timeout_s: 60
+post_check:
+  - check: container_running
+  - check: health_endpoint_ok
+    if_defined: true
+rollback: none
+compensation:                        # restart не обратим: соединения разрываются
+  - action: notify_service_owner
+  - action: escalate_incident_severity
+    when: post_check_failed
+  - action: propose_change
+    when: post_check_failed
+    propose: docker.container.logs_collect
+side_effects: [active_connections_dropped, in_flight_requests_lost]
+rate_limit: 5/hour/asset
+owner: platform-team
+certified_by: [tenant_admin]
+tests:
+  - services/execution-gateway/gateway_test.go

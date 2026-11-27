@@ -1,0 +1,22 @@
+capability_id: NET-015
+version: 1.0.0
+domain: network
+name: Troubleshooting — сценарий HTTP 502
+tier: MVP
+mode: build
+owner_agent: network-engineer
+supporting_agents: [ai-commander, devops-engineer, dba-engineer]
+standards: [STD-17]
+operations:
+  - {level: observe,   tool: metrics.query}
+  - {level: diagnose,  tool: fortigate.policy.status}
+  - {level: diagnose,  tool: logs.search}
+  - {level: recommend, tool: topology.blast_radius}
+asset_types: [firewall, linux_host, docker_host]
+preconditions: [asset_verified]
+risk: low
+autonomy_ceiling: observer
+approval_policy: none_read_only
+evidence_schema: [rca_hypotheses, evidence_refs]
+tests: [T-AI-001]
+lifecycle_state: in_development

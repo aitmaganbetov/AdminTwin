@@ -1,0 +1,26 @@
+# Пример из Приложения B.1 (P1a): runbook patch.apply ещё не существует — допустимо для draft.
+capability_id: SYS-003
+version: 1.0.0
+domain: system_administration
+name: Patch Management
+tier: P1a
+mode: build
+owner_agent: linux-admin
+supporting_agents: [windows-admin, security-analyst, itsm-agent]
+standards: [STD-01, STD-10, STD-14]
+operations:
+  - {level: observe,   tool: patch.inventory}
+  - {level: diagnose,  tool: patch.assess}
+  - {level: recommend, tool: patch.plan}
+  - {level: propose,   tool: change.propose}
+  - {level: execute,   runbook: patch.apply}
+  - {level: verify,    runbook_step: patch.apply.post_check}
+  - {level: rollback,  runbook: patch.rollback}
+asset_types: [linux_host, windows_host]
+preconditions: [asset_verified, backup_status_known, service_owner_known, ring_assigned]
+risk: high
+autonomy_ceiling: operator
+approval_policy: matrix_11_4
+evidence_schema: [baseline, scan_result, change_id, deployment_log, verification]
+tests: [T-SYS-003a, T-SYS-003b, T-SYS-003c]
+lifecycle_state: draft

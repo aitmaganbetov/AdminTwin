@@ -1,0 +1,24 @@
+capability_id: DEV-006
+version: 1.0.0
+domain: devops
+name: Containers — health и безопасный restart
+tier: MVP
+mode: build
+owner_agent: devops-engineer
+supporting_agents: [ai-commander]
+standards: [STD-14, STD-19]
+operations:
+  - {level: observe,   tool: docker.container.inspect}
+  - {level: diagnose,  tool: logs.search}
+  - {level: recommend, tool: topology.blast_radius}
+  - {level: propose,   tool: change.propose}
+  - {level: execute,   runbook: docker.container.restart}
+  - {level: verify,    runbook_step: docker.container.restart.post_check}
+asset_types: [docker_host]
+preconditions: [asset_verified, service_owner_known]
+risk: low
+autonomy_ceiling: autonomous
+approval_policy: matrix_11_4
+evidence_schema: [container_state_before, change_id, execution_log, container_state_after]
+tests: [T-CAP-001, T-CAP-002, T-CAP-003]
+lifecycle_state: in_development

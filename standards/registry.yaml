@@ -1,0 +1,495 @@
+# Приложение A — Standards Registry (машиночитаемо). Упоминание стандарта не означает сертификацию.
+# reviewed_at заполняет владелец при каждом цикле проверки редакций (ADR-017).
+registry_version: A-1.0
+as_of: '2026-11-09'
+standards:
+- standard_id: STD-01
+  title: ISO/IEC 27001, 27002
+  edition: '2022'
+  area: ISMS, контроли
+  required_evidence: SoA, риск-реестр, evidence контролей
+  modules:
+  - M10
+  - M11
+  - M26
+  module_refs_raw: M10, M11, M26
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-02
+  title: ISO/IEC 20000-1
+  edition: '2018'
+  area: управление ИТ-услугами
+  required_evidence: процессы incident/change
+  modules:
+  - M06
+  - M19
+  - M27
+  module_refs_raw: M06, M19, M27
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-03
+  title: ISO 22301
+  edition: '2019'
+  area: непрерывность
+  required_evidence: BIA, BCP, учения
+  modules:
+  - M13
+  module_refs_raw: M13
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-04
+  title: ISO/IEC 27031
+  edition: текущая (проверить год издания)
+  area: готовность ИКТ к непрерывности
+  required_evidence: recovery strategies, DR drills
+  modules:
+  - M13
+  module_refs_raw: M13
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-05
+  title: ISO/IEC 27033 (части 1–6)
+  edition: текущие
+  area: безопасность сетей
+  required_evidence: сегментация, конфигурационные проверки
+  modules:
+  - M14
+  module_refs_raw: M14
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-06
+  title: ISO/IEC 42001
+  edition: '2023'
+  area: система менеджмента ИИ
+  required_evidence: AI risk register, model governance, evals
+  modules:
+  - M21
+  - M22
+  - M26
+  module_refs_raw: M21, M22, M26
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-07
+  title: NIST CSF
+  edition: '2.0'
+  area: Govern/Identify/Protect/Detect/Respond/Recover
+  required_evidence: профиль CSF, gap assessment
+  modules:
+  - M26
+  module_refs_raw: M26
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-08
+  title: NIST SP 800-53
+  edition: Rev. 5
+  area: каталог контролей
+  required_evidence: control mappings, tests
+  modules:
+  - M26
+  module_refs_raw: M26
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-09
+  title: NIST SP 800-61
+  edition: Rev. 3 (проверить)
+  area: реагирование на инциденты
+  required_evidence: IR plans, exercises
+  modules:
+  - M06
+  - M11
+  module_refs_raw: M06, M11
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-10
+  title: NIST SP 800-40
+  edition: Rev. 4
+  area: управление патчами
+  required_evidence: patch lifecycle, SLA
+  modules:
+  - M15
+  module_refs_raw: M15, B/SYS-003
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-11
+  title: NIST SP 800-207
+  edition: '2020'
+  area: Zero Trust
+  required_evidence: политики доступа, сегментация
+  modules:
+  - M10
+  - M14
+  module_refs_raw: M10, M14
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-12
+  title: NIST SP 800-218 SSDF
+  edition: '1.1'
+  area: secure SDLC
+  required_evidence: secure build evidence
+  modules:
+  - M12
+  module_refs_raw: M12
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-13
+  title: NIST AI RMF
+  edition: 1.0 (+ GenAI Profile)
+  area: риски ИИ
+  required_evidence: карта рисков, тесты моделей
+  modules:
+  - M21
+  - M22
+  module_refs_raw: M21, M22
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-14
+  title: CIS Controls, CIS Benchmarks
+  edition: v8.1; применимые benchmarks
+  area: техническое укрепление
+  required_evidence: baseline сканы, исключения
+  modules:
+  - M11
+  module_refs_raw: M11, B/SYS-012
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-15
+  title: OWASP ASVS, API Security Top 10, Top 10 for LLM Apps
+  edition: ASVS 5.0 (проверить); API 2023; LLM 2025
+  area: безопасность приложений и AI
+  required_evidence: security tests, threat models
+  modules:
+  - M10
+  - M21
+  module_refs_raw: M10, M21
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-16
+  title: IEEE 802.1Q, 802.1X, 802.1AX, 802.3
+  edition: текущие
+  area: L2/VLAN/NAC/Ethernet
+  required_evidence: сетевые проверки
+  modules:
+  - M14
+  module_refs_raw: M14
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-17
+  title: IETF RFC (IPv4/IPv6, BGP, OSPF, DHCP, DNS, NTP, SNMPv3, NETCONF/RESTCONF/YANG)
+  edition: применимые
+  area: протоколы
+  required_evidence: protocol test suite
+  modules:
+  - M03
+  - M14
+  module_refs_raw: M03, M14
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-18
+  title: OpenGitOps, SLSA, SPDX/CycloneDX
+  edition: SLSA v1.0; SPDX 3.0; CycloneDX 1.6
+  area: GitOps, provenance, SBOM
+  required_evidence: подписанные артефакты, attestations
+  modules:
+  - M12
+  module_refs_raw: M12
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-19
+  title: DORA metrics, Google SRE
+  edition: практики
+  area: delivery, reliability
+  required_evidence: deployment metrics, SLO/error budgets
+  modules:
+  - M05
+  - M12
+  - M19
+  module_refs_raw: M05, M12, M19
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-20
+  title: ITIL 4
+  edition: практики
+  area: ITSM
+  required_evidence: records, approvals, SLA
+  modules:
+  - M19
+  - M27
+  module_refs_raw: M19, M27
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-21
+  title: MITRE ATT&CK, STIX/TAXII
+  edition: ATT&CK текущая; STIX 2.1, TAXII 2.1
+  area: detection, TI
+  required_evidence: rule mappings, feed provenance
+  modules:
+  - M11
+  module_refs_raw: M11
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-22
+  title: CVE, CVSS, EPSS, CISA KEV
+  edition: CVSS v4.0
+  area: приоритизация уязвимостей
+  required_evidence: risk-ranked remediation
+  modules:
+  - M11
+  module_refs_raw: M11
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-23
+  title: CSA Cloud Controls Matrix
+  edition: v4
+  area: SaaS/cloud
+  required_evidence: shared-responsibility mapping
+  modules: []
+  module_refs_raw: SaaS-редакция
+  applicability:
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-24
+  title: WCAG
+  edition: 2.2 AA
+  area: доступность UI
+  required_evidence: accessibility audit
+  modules:
+  - M08
+  module_refs_raw: M08, UI
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-25
+  title: NIST OSCAL
+  edition: 1.1.x
+  area: формат compliance-данных
+  required_evidence: catalog/profile/SSP/assessment-results
+  modules:
+  - M25
+  - M26
+  module_refs_raw: M25, M26
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-26
+  title: SCAP / OVAL / XCCDF
+  edition: SCAP 1.3
+  area: машиночитаемые конфигурационные проверки
+  required_evidence: результаты сканов
+  modules:
+  - M11
+  - M26
+  module_refs_raw: M11, M26
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - all
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-27
+  title: Закон РК «О персональных данных и их защите» и подзаконные акты
+  edition: действующая редакция
+  area: ПДн в РК
+  required_evidence: реестр ПДн, журнал доступа, локализация
+  modules:
+  - M26
+  module_refs_raw: M26, §18.3 ядра
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - KZ
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'
+- standard_id: STD-28
+  title: GDPR (для внедрений в ЕС)
+  edition: 2016/679
+  area: ПДн в ЕС
+  required_evidence: профиль-конфигурация
+  modules:
+  - M26
+  module_refs_raw: M26
+  applicability:
+  - enterprise
+  - saas
+  jurisdictions:
+  - EU
+  owner: compliance-manager
+  reviewed_at: null
+  next_review_at: null
+  control_mapping_version: '1.0'

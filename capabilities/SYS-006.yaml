@@ -1,0 +1,19 @@
+capability_id: SYS-006
+version: 1.0.0
+domain: system_administration
+name: IAM lifecycle — joiner/mover/leaver (через IGA)
+tier: P1b
+mode: integration_only
+owner_agent: windows-admin
+supporting_agents: [security-analyst]
+standards: [STD-01, STD-11]
+operations:
+  - {level: observe, tool: iga.access_review.read}
+asset_types: [identity_provider]
+preconditions: [iga_connector_configured]
+risk: high
+autonomy_ceiling: observer
+approval_policy: external_system
+evidence_schema: [access_review_from_iga]
+tests: []
+lifecycle_state: draft

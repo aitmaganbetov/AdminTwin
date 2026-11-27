@@ -1,0 +1,19 @@
+capability_id: ITSM-003
+version: 1.0.0
+domain: itsm
+name: Change — standard/normal/emergency (M27 минимально)
+tier: MVP
+mode: build
+owner_agent: ai-commander
+supporting_agents: [linux-admin, devops-engineer]
+standards: [STD-02, STD-20]
+operations:
+  - {level: propose, tool: change.propose}
+asset_types: [linux_host, docker_host]
+preconditions: [runbook_certified]
+risk: low
+autonomy_ceiling: operator
+approval_policy: matrix_11_4
+evidence_schema: [approved_change, pir]
+tests: [T-CAP-002]
+lifecycle_state: in_development

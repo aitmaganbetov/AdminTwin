@@ -1,0 +1,24 @@
+capability_id: SYS-002
+version: 1.0.0
+domain: system_administration
+name: Systemd services — диагностика, зависимости, безопасный restart
+tier: MVP
+mode: build
+owner_agent: linux-admin
+supporting_agents: [ai-commander]
+standards: [STD-01, STD-02]
+operations:
+  - {level: observe,   tool: linux.service.status}
+  - {level: diagnose,  tool: logs.search}
+  - {level: recommend, tool: topology.blast_radius}
+  - {level: propose,   tool: change.propose}
+  - {level: execute,   runbook: linux.service.restart}
+  - {level: verify,    runbook_step: linux.service.restart.post_check}
+asset_types: [linux_host]
+preconditions: [asset_verified, service_owner_known]
+risk: low
+autonomy_ceiling: autonomous
+approval_policy: matrix_11_4
+evidence_schema: [before_health, change_id, execution_log, after_health]
+tests: [T-CAP-001, T-CAP-003]
+lifecycle_state: in_development

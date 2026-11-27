@@ -1,0 +1,24 @@
+capability_id: SYS-009
+version: 1.0.0
+domain: system_administration
+name: Filesystems и ёмкость дисков (Linux)
+tier: MVP
+mode: build
+owner_agent: linux-admin
+supporting_agents: [ai-commander]
+standards: [STD-01]
+operations:
+  - {level: observe,   tool: linux.disk.usage}
+  - {level: diagnose,  tool: logs.search}
+  - {level: recommend, tool: metrics.query}
+  - {level: propose,   tool: change.propose}
+  - {level: execute,   runbook: linux.logs.rotate_cleanup}
+  - {level: verify,    runbook_step: linux.logs.rotate_cleanup.post_check}
+asset_types: [linux_host]
+preconditions: [asset_verified, legal_hold_absent, no_active_investigation]
+risk: medium
+autonomy_ceiling: autonomous
+approval_policy: matrix_11_4
+evidence_schema: [disk_usage_before, dry_run_report, change_id, execution_log, disk_usage_after]
+tests: [T-LH-001]
+lifecycle_state: in_development

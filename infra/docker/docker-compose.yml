@@ -1,0 +1,29 @@
+# Enterprise small / локальная разработка (без SLA 99.9%, §3.5). Запуск: make up
+# ВНИМАНИЕ: dev-аутентификация и симулятор включены — только для локальной разработки.
+name: admintwin
+services:
+  core:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.core
+    image: admintwin-core:dev
+    environment:
+      ADMINTWIN_DEV_AUTH: "true"
+      ADMINTWIN_SIMULATOR: "true"
+      ADMINTWIN_FIXTURES: /opt/admintwin/infra/dev/fixtures.yaml
+    ports: ["127.0.0.1:8080:8080"]
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: admintwin
+      POSTGRES_USER: admintwin_owner
+      POSTGRES_PASSWORD: ${ADMINTWIN_PG_PASSWORD:?set ADMINTWIN_PG_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../../db/migrations/0001_init.up.sql:/docker-entrypoint-initdb.d/0001_init.up.sql:ro
+    ports: ["127.0.0.1:5432:5432"]
+volumes:
+  pgdata: {}

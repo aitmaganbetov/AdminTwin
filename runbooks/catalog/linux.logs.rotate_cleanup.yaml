@@ -1,0 +1,50 @@
+# ТЗ §11.3: allowlist каталогов; dry-run показывает объём; preflight проверяет legal_hold
+# и активные расследования (§9.1, §11.6, T-LH-001).
+id: linux.logs.rotate_cleanup
+version: 1.0.0
+title: Ротация и очистка журналов
+risk: medium
+change_type_default: normal
+scope:
+  - asset_type: linux_host
+modes_allowed: [operator, autonomous]
+parameters:
+  directory:
+    type: string
+    enum: [/var/log/nginx, /var/log/app, /var/log/journal-archive, /var/lib/docker/containers]
+    source: asset_inventory
+    kind: log_directory
+  older_than_days:
+    type: integer
+    minimum: 3
+    maximum: 365
+    default: 14
+  dry_run:
+    type: boolean
+    default: false
+preflight:
+  - check: asset_verified
+  - check: environment_matches_policy
+  - check: legal_hold_absent
+  - check: no_active_investigation
+  - check: maintenance_window_ok
+  - check: directory_in_allowlist
+execute:
+  engine: builtin
+  action: logs_rotate_cleanup
+  timeout_s: 300
+  supports_dry_run: true
+post_check:
+  - check: disk_usage_below
+    args: {percent: 90}
+  - check: log_writers_healthy
+rollback: none
+compensation:
+  - action: notify_service_owner
+  - action: attach_dry_run_report_to_change
+side_effects: [old_log_files_deleted]
+rate_limit: 2/day/asset
+owner: platform-team
+certified_by: [tenant_admin]
+tests:
+  - services/execution-gateway/gateway_test.go

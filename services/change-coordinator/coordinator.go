@@ -73,6 +73,8 @@ type ChangeRequest struct {
 
 	idemKey  string
 	idemHash string
+	// awaitingWindow — отложено до maintenance window; только такие change запускает Tick.
+	awaitingWindow bool
 	fence    uint64
 	cancel   context.CancelFunc
 }
@@ -367,14 +369,15 @@ func (c *Coordinator) Tick() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, cr := range c.changes {
-		if cr.Status != Scheduled {
-			continue
+		if cr.Status != Scheduled || !cr.awaitingWindow {
+			continue // уже исполняется (идёт preflight) или не ждёт окна
 		}
 		tp, _ := c.Tenants(cr.TenantID)
 		if tp.InMaintenanceWindow(c.now()) {
 			rb, _ := c.Catalog.Get(cr.RunbookID)
 			asset, ok := c.Inventory.Get(cr.TenantID, cr.AssetID)
 			if ok && rb != nil {
+				cr.awaitingWindow = false
 				c.startLocked(cr, rb, asset, tp)
 			}
 		}
@@ -384,6 +387,7 @@ func (c *Coordinator) Tick() {
 func (c *Coordinator) scheduleLocked(cr *ChangeRequest, rb *runbook.Spec, asset *inventory.Asset, tp policy.TenantPolicy) {
 	c.transition(cr, Scheduled, "system:change-coordinator", "scheduled")
 	if cr.Policy.RequiresMaintenanceWindow && !tp.InMaintenanceWindow(c.now()) {
+		cr.awaitingWindow = true
 		return // ждёт окна; Tick() запустит
 	}
 	c.startLocked(cr, rb, asset, tp)

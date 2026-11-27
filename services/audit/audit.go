@@ -104,28 +104,75 @@ type Checkpoint struct {
 	Signature string    `json:"signature"`
 }
 
+// Store — постоянное хранилище цепочек (PostgreSQL). Append обязан атомарно проверить, что
+// e.PrevHash совпадает с последним хэшем tenant в хранилище; иначе — ErrChainConflict.
+type Store interface {
+	Append(e Entry) error
+	Load(tenantID string) ([]Entry, error)
+}
+
+// ErrChainConflict — цепочку параллельно продлил другой экземпляр ядра.
+var ErrChainConflict = errors.New("audit chain conflict")
+
 // Log — журнал аудита.
 type Log struct {
 	mu     sync.Mutex
 	chains map[string][]Entry
+	loaded map[string]bool
 	keys   KeyStore
 	signer ed25519.PrivateKey
 	now    func() time.Time
+	store  Store
+}
+
+// WithStore включает постоянное хранение (вызывать до первой записи).
+func (l *Log) WithStore(s Store) *Log {
+	l.store = s
+	return l
+}
+
+// chainLocked возвращает цепочку tenant, при необходимости подгружая её из хранилища.
+func (l *Log) chainLocked(tenantID string) ([]Entry, error) {
+	if l.store != nil && !l.loaded[tenantID] {
+		c, err := l.store.Load(tenantID)
+		if err != nil {
+			return nil, err
+		}
+		l.chains[tenantID] = c
+		l.loaded[tenantID] = true
+	}
+	return l.chains[tenantID], nil
 }
 
 // New создаёт журнал. signer — ключ подписи checkpoint'ов.
 func New(keys KeyStore, signer ed25519.PrivateKey) *Log {
-	return &Log{chains: map[string][]Entry{}, keys: keys, signer: signer, now: time.Now}
+	return &Log{chains: map[string][]Entry{}, loaded: map[string]bool{}, keys: keys, signer: signer, now: time.Now}
 }
 
 // Append добавляет запись. Изменение и удаление записей не предусмотрены.
 func (l *Log) Append(r Record) (Entry, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	chain := l.chains[r.TenantID]
+	for attempt := 0; ; attempt++ {
+		e, err := l.appendLocked(r)
+		if errors.Is(err, ErrChainConflict) && attempt < 3 {
+			l.loaded[r.TenantID] = false // перечитать цепочку и повторить
+			continue
+		}
+		return e, err
+	}
+}
+
+func (l *Log) appendLocked(r Record) (Entry, error) {
+	chain, err := l.chainLocked(r.TenantID)
+	if err != nil {
+		return Entry{}, err
+	}
+	// Время и данные нормализуются до вычисления хэша так, как их вернёт хранилище
+	// (timestamptz — микросекунды, jsonb — канонический JSON), иначе цепочка не сойдётся после перечитывания.
 	e := Entry{
-		Seq: uint64(len(chain)) + 1, TenantID: r.TenantID, At: l.now().UTC(),
-		Actor: r.Actor, Action: r.Action, ObjectType: r.ObjectType, ObjectID: r.ObjectID, Data: r.Data,
+		Seq: uint64(len(chain)) + 1, TenantID: r.TenantID, At: l.now().UTC().Truncate(time.Microsecond),
+		Actor: r.Actor, Action: r.Action, ObjectType: r.ObjectType, ObjectID: r.ObjectID, Data: normalizeData(r.Data),
 		PrevHash: genesis(r.TenantID),
 	}
 	if len(chain) > 0 {
@@ -143,6 +190,11 @@ func (l *Log) Append(r Record) (Entry, error) {
 		return Entry{}, err
 	}
 	e.Hash = h
+	if l.store != nil {
+		if err := l.store.Append(e); err != nil {
+			return Entry{}, err
+		}
+	}
 	l.chains[r.TenantID] = append(chain, e)
 	return e, nil
 }
@@ -151,6 +203,12 @@ func (l *Log) Append(r Record) (Entry, error) {
 func (l *Log) Entries(tenantID string) []Entry {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.store != nil {
+		// Чтение и верификация — по сохранённой цепочке (включая записи других экземпляров ядра).
+		if c, err := l.store.Load(tenantID); err == nil {
+			l.chains[tenantID], l.loaded[tenantID] = c, true
+		}
+	}
 	return append([]Entry(nil), l.chains[tenantID]...)
 }
 
@@ -256,6 +314,19 @@ func newGCM(key []byte) (cipher.AEAD, error) {
 		return nil, err
 	}
 	return cipher.NewGCM(b)
+}
+
+func normalizeData(d map[string]any) map[string]any {
+	if d == nil {
+		return nil
+	}
+	b, err := json.Marshal(d)
+	if err != nil {
+		return map[string]any{"_unserializable": true}
+	}
+	var out map[string]any
+	_ = json.Unmarshal(b, &out)
+	return out
 }
 
 func genesis(tenantID string) string {

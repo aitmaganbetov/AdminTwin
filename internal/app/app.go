@@ -2,8 +2,11 @@
 package app
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,8 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
 
+	"github.com/aitmaganbetov/admintwin/pkg/db"
 	"github.com/aitmaganbetov/admintwin/pkg/httpapi"
 	"github.com/aitmaganbetov/admintwin/pkg/killswitch"
 	"github.com/aitmaganbetov/admintwin/pkg/oidc"
@@ -40,6 +45,13 @@ type Config struct {
 	OIDCJWKSURL  string
 	// ServiceToken — общий секрет сервисов (оркестратор, сборщики), ≥ 32 символов.
 	ServiceToken string
+	// DatabaseURL — PostgreSQL; пусто — in-memory (dev/test). Migrate — применить db/migrations при старте.
+	DatabaseURL string
+	Migrate     bool
+	// AuditSigningKey — base64 seed Ed25519 (32 байта) для подписи checkpoint'ов аудита.
+	AuditSigningKey string
+	// PIIMasterKey — base64 KEK (32 байта) для обёртки ключей ПДн tenant (crypto-shredding).
+	PIIMasterKey string
 	Simulator    bool
 	Version      string
 	Logger       *slog.Logger
@@ -49,14 +61,15 @@ type Config struct {
 type App struct {
 	Server      *api.Server
 	Coordinator *change.Coordinator
-	Inventory   *inventory.Store
+	Inventory   inventory.Repository
+	DB          *db.DB
 	Tools       *toolsvc.Service
 	Registry    *registry.Registry
 	Audit       *audit.Log
 	AuditPub    ed25519.PublicKey
 	Kill        *killswitch.Switch
 	Sim         *sim.Infra
-	Evidence    *evidence.Store
+	Evidence    evidence.Repository
 	tenantsMu   sync.RWMutex
 	tenants     map[string]policy.TenantPolicy
 }
@@ -69,15 +82,62 @@ func (a *App) Tenant(id string) (policy.TenantPolicy, bool) {
 	return t, ok
 }
 
-// SetTenant задаёт политику tenant (используется тестами и будущим API настроек).
+// SetTenant задаёт политику tenant (в режиме БД — сохраняет её).
 func (a *App) SetTenant(p policy.TenantPolicy) {
+	if err := a.SaveTenant(p); err != nil {
+		slog.Error("tenant policy not saved", "tenant", p.TenantID, "error", err)
+	}
+}
+
+// SaveTenant сохраняет политику tenant (БД — платформенная операция) и обновляет кэш.
+func (a *App) SaveTenant(p policy.TenantPolicy) error {
+	if !p.Mode.Valid() {
+		return fmt.Errorf("invalid autonomy mode %q", p.Mode)
+	}
+	if a.DB != nil {
+		doc, _ := json.Marshal(p)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := a.DB.Platform(ctx, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `INSERT INTO tenants (id, name, edition, autonomy_mode, policy) VALUES ($1::uuid, $1::text, 'enterprise', $2, $3)
+				ON CONFLICT (id) DO UPDATE SET autonomy_mode = EXCLUDED.autonomy_mode, policy = EXCLUDED.policy`, p.TenantID, string(p.Mode), doc)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
 	a.tenantsMu.Lock()
 	defer a.tenantsMu.Unlock()
 	a.tenants[p.TenantID] = p
+	return nil
 }
 
-type tenantFixture struct {
-	Tenants []policy.TenantPolicy `yaml:"tenants"`
+func (a *App) loadTenantsFromDB(ctx context.Context) error {
+	return a.DB.Platform(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, "SELECT id::text, autonomy_mode, policy FROM tenants")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		a.tenantsMu.Lock()
+		defer a.tenantsMu.Unlock()
+		for rows.Next() {
+			var id, mode string
+			var doc []byte
+			if err := rows.Scan(&id, &mode, &doc); err != nil {
+				return err
+			}
+			var p policy.TenantPolicy
+			_ = json.Unmarshal(doc, &p)
+			p.TenantID, p.Mode = id, runbook.Mode(mode)
+			if p.ID == "" {
+				p.ID = id
+			}
+			a.tenants[id] = p
+		}
+		return rows.Err()
+	})
 }
 
 // New собирает приложение. Любая ошибка реестров — отказ старта (fail closed).
@@ -100,30 +160,56 @@ func New(cfg Config) (*App, error) {
 		return nil, err
 	}
 
-	a := &App{Inventory: inventory.NewStore(), Kill: killswitch.New(), Evidence: evidence.NewStore(), tenants: map[string]policy.TenantPolicy{}}
-	if cfg.FixturesPath != "" {
-		if err := a.Inventory.LoadFixture(cfg.FixturesPath); err != nil {
-			return nil, fmt.Errorf("fixtures: %w", err)
-		}
-		raw, err := os.ReadFile(cfg.FixturesPath)
-		if err != nil {
-			return nil, err
-		}
-		var tf tenantFixture
-		if err := yaml.Unmarshal(raw, &tf); err != nil {
-			return nil, err
-		}
-		for _, t := range tf.Tenants {
-			a.SetTenant(t)
-		}
-	}
+	a := &App{Kill: killswitch.New(), tenants: map[string]policy.TenantPolicy{}}
 
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	signer, err := signingKey(cfg)
 	if err != nil {
 		return nil, err
 	}
-	a.AuditPub = pub
-	a.Audit = audit.New(audit.NewMemoryKeys(), priv)
+	a.AuditPub = signer.Public().(ed25519.PublicKey)
+
+	if cfg.DatabaseURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		a.DB, err = db.Open(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return nil, err
+		}
+		if cfg.Migrate {
+			applied, err := a.DB.Migrate(ctx, filepath.Join(cfg.Root, "db", "migrations"))
+			if err != nil {
+				return nil, err
+			}
+			if len(applied) > 0 {
+				slog.Info("migrations applied", "versions", applied)
+			}
+		}
+		kek, err := decodeKey(cfg.PIIMasterKey, "ADMINTWIN_PII_MASTER_KEY")
+		if err != nil {
+			if !cfg.DevAuth {
+				return nil, err
+			}
+			slog.Warn("PII master key not set: using an ephemeral key (dev only) — PII in audit becomes unreadable after restart")
+			kek = make([]byte, 32)
+			_, _ = rand.Read(kek)
+		}
+		a.Inventory = inventory.NewPGStore(a.DB)
+		a.Evidence = evidence.PGStore{DB: a.DB}
+		a.Audit = audit.New(audit.PGKeys{DB: a.DB, KEK: kek}, signer).WithStore(audit.PGStore{DB: a.DB})
+		if err := a.loadTenantsFromDB(ctx); err != nil {
+			return nil, fmt.Errorf("load tenants: %w", err)
+		}
+	} else {
+		a.Inventory = inventory.NewStore()
+		a.Evidence = evidence.NewStore()
+		a.Audit = audit.New(audit.NewMemoryKeys(), signer)
+	}
+
+	if cfg.FixturesPath != "" {
+		if err := a.loadFixtures(cfg.FixturesPath); err != nil {
+			return nil, fmt.Errorf("fixtures: %w", err)
+		}
+	}
 
 	gw := &gateway.Gateway{Evidence: a.Evidence, Kill: a.Kill}
 	if cfg.Simulator {
@@ -143,6 +229,16 @@ func New(cfg Config) (*App, error) {
 	}
 	// Без симулятора и без коннекторов движков нет: исполнения завершаются отказом (fail closed).
 	a.Coordinator = change.New(cat, a.Inventory, policy.Builtin{}, a.Tenant, gw, a.Audit, a.Kill)
+	if a.DB != nil {
+		a.Coordinator.Persist = change.PGStore{DB: a.DB}
+		n, err := a.Coordinator.Recover()
+		if err != nil {
+			return nil, fmt.Errorf("recover changes: %w", err)
+		}
+		if n > 0 {
+			slog.Info("changes recovered", "count", n)
+		}
+	}
 
 	a.Registry = reg
 	a.Tools, err = toolsvc.Load(filepath.Join(cfg.Root, "ai", "tools", "read"), a.Inventory, reg.ToolScope, a.Audit)
@@ -172,4 +268,75 @@ func New(cfg Config) (*App, error) {
 		Modules: []httpapi.Module{a.Tools},
 	}
 	return a, nil
+}
+
+// loadFixtures загружает демо-данные (tenants, активы, связи) в выбранное хранилище. Только dev/test.
+func (a *App) loadFixtures(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var f struct {
+		Tenants      []policy.TenantPolicy  `yaml:"tenants"`
+		Assets       []inventory.Asset      `yaml:"assets"`
+		Dependencies []inventory.Dependency `yaml:"dependencies"`
+	}
+	if err := yaml.Unmarshal(raw, &f); err != nil {
+		return err
+	}
+	for _, t := range f.Tenants {
+		if _, exists := a.Tenant(t.TenantID); exists && a.DB != nil {
+			continue // политика в БД главнее фикстуры
+		}
+		if err := a.SaveTenant(t); err != nil {
+			return err
+		}
+	}
+	for _, as := range f.Assets {
+		if err := a.Inventory.Put(as); err != nil {
+			return err
+		}
+	}
+	existing := map[string]bool{}
+	for t := range a.tenants {
+		for _, d := range a.Inventory.Dependencies(t) {
+			existing[d.Source+">"+d.Target+">"+d.RelationType] = true
+		}
+	}
+	for _, d := range f.Dependencies {
+		if existing[d.Source+">"+d.Target+">"+d.RelationType] {
+			continue
+		}
+		if d.DiscoveredAt.IsZero() {
+			d.DiscoveredAt = time.Now().UTC()
+		}
+		if err := a.Inventory.AddDependency(d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func decodeKey(b64, name string) ([]byte, error) {
+	if b64 == "" {
+		return nil, fmt.Errorf("%s is required", name)
+	}
+	k, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil || len(k) != 32 {
+		return nil, fmt.Errorf("%s must be base64 of 32 bytes", name)
+	}
+	return k, nil
+}
+
+// signingKey — ключ подписи checkpoint'ов аудита. Без БД допускается эфемерный (dev/test).
+func signingKey(cfg Config) (ed25519.PrivateKey, error) {
+	seed, err := decodeKey(cfg.AuditSigningKey, "ADMINTWIN_AUDIT_SIGNING_KEY")
+	if err == nil {
+		return ed25519.NewKeyFromSeed(seed), nil
+	}
+	if cfg.DatabaseURL != "" && !cfg.DevAuth {
+		return nil, err
+	}
+	_, priv, gerr := ed25519.GenerateKey(rand.Reader)
+	return priv, gerr
 }

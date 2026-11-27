@@ -38,7 +38,7 @@ type Server struct {
 	Catalog   *runbook.Catalog
 	Registry  *registry.Registry
 	Audit     *audit.Log
-	Evidence  *evidence.Store
+	Evidence  evidence.Repository
 	Kill      *killswitch.Switch
 	Tenants   func(string) (policy.TenantPolicy, bool)
 	Log       *slog.Logger

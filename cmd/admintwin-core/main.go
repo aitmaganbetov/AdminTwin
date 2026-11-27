@@ -27,9 +27,14 @@ func main() {
 		OIDCAudience: os.Getenv("ADMINTWIN_OIDC_AUDIENCE"),
 		OIDCJWKSURL:  os.Getenv("ADMINTWIN_OIDC_JWKS_URL"),
 		ServiceToken: os.Getenv("ADMINTWIN_SERVICE_TOKEN"),
-		Simulator:    os.Getenv("ADMINTWIN_SIMULATOR") == "true",
-		Version:      version,
-		Logger:       log,
+		DatabaseURL:  os.Getenv("ADMINTWIN_DATABASE_URL"),
+		Migrate:      os.Getenv("ADMINTWIN_DB_MIGRATE") != "false",
+		// Ключи — из секрет-хранилища развертывания (Vault Agent / Kubernetes Secret), не из репозитория.
+		AuditSigningKey: os.Getenv("ADMINTWIN_AUDIT_SIGNING_KEY"),
+		PIIMasterKey:    os.Getenv("ADMINTWIN_PII_MASTER_KEY"),
+		Simulator:       os.Getenv("ADMINTWIN_SIMULATOR") == "true",
+		Version:         version,
+		Logger:          log,
 	}
 	if cfg.DevAuth {
 		log.Warn("DEV AUTH ENABLED: identity is taken from request headers; never use outside local development")

@@ -11,9 +11,11 @@ test:
 test-race:
 	go test -race -count=1 ./...
 
-# Тест RLS на реальном PostgreSQL: ADMINTWIN_TEST_DATABASE_URL=postgres://... make test-db
+# Тесты на реальном PostgreSQL (каждый пересоздаёт схему в своей БД):
+#   ADMINTWIN_TEST_DATABASE_URL=postgres://.../admintwin_test ADMINTWIN_TEST_STORE_URL=postgres://.../admintwin_store make test-db
 test-db:
 	go test -count=1 -v ./tests/security/
+	go test -count=1 -v -run TestPostgresStore ./tests/e2e/
 
 lint:
 	@test -z "$$(gofmt -l cmd internal pkg services tests)" || (gofmt -l cmd internal pkg services tests; exit 1)

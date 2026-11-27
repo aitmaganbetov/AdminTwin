@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -75,8 +76,12 @@ type ChangeRequest struct {
 	idemHash string
 	// awaitingWindow — отложено до maintenance window; только такие change запускает Tick.
 	awaitingWindow bool
-	fence          uint64
-	cancel         context.CancelFunc
+	// Учёт уже сохранённых переходов/решений и последняя ошибка сохранения.
+	savedTransitions int
+	savedDecisions   int
+	persistErr       error
+	fence            uint64
+	cancel           context.CancelFunc
 }
 
 // ProposeInput — запрос на изменение (человек или propose-tool агента).
@@ -105,6 +110,8 @@ type Coordinator struct {
 	Audit     *audit.Log
 	Kill      *killswitch.Switch
 	Now       func() time.Time
+	// Persist — постоянное хранилище (PostgreSQL); nil — только память (dev/test).
+	Persist Persister
 }
 
 // New создаёт координатор и подписывает его на kill switch.
@@ -191,6 +198,12 @@ func (c *Coordinator) Propose(actor identity.Actor, in ProposeInput) (*ChangeReq
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.changes[cr.ID] = cr
+	if c.Persist != nil {
+		if err := c.persistLocked(cr); err != nil {
+			delete(c.changes, cr.ID)
+			return nil, fmt.Errorf("persist change: %w", err)
+		}
+	}
 	if in.IdempotencyKey != "" {
 		c.idem[idemScope] = cr.ID
 	}
@@ -399,6 +412,11 @@ func (c *Coordinator) startLocked(cr *ChangeRequest, rb *runbook.Spec, asset *in
 		c.transition(cr, Cancelled, "system:kill-switch", "kill switch active")
 		return
 	}
+	if cr.persistErr != nil {
+		// Не исполняем то, что не смогли надёжно зафиксировать (fail closed).
+		c.transition(cr, Failed, "system:change-coordinator", "change state could not be persisted: execution refused")
+		return
+	}
 	ex := Execution{ID: newID(), ChangeID: cr.ID, TenantID: cr.TenantID, RunbookID: rb.ID, AssetID: asset.ID, Status: "preflight", StartedAt: c.now()}
 	cr.Executions = append(cr.Executions, ex)
 	idx := len(cr.Executions) - 1
@@ -527,6 +545,11 @@ func (c *Coordinator) Get(tenantID, id string) (*ChangeRequest, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cr, ok := c.changes[id]
+	if !ok && c.Persist != nil {
+		if p, found, err := c.Persist.Get(tenantID, id); err == nil && found {
+			return p, true
+		}
+	}
 	if !ok || cr.TenantID != tenantID {
 		return nil, false
 	}
@@ -538,9 +561,20 @@ func (c *Coordinator) List(tenantID string) []*ChangeRequest {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var out []*ChangeRequest
+	seen := map[string]bool{}
 	for _, cr := range c.changes {
 		if cr.TenantID == tenantID {
 			out = append(out, cr.snapshot())
+			seen[cr.ID] = true
+		}
+	}
+	if c.Persist != nil {
+		if older, err := c.Persist.List(tenantID, 500); err == nil {
+			for _, cr := range older {
+				if !seen[cr.ID] {
+					out = append(out, cr)
+				}
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
@@ -598,7 +632,28 @@ func (c *Coordinator) transition(cr *ChangeRequest, to fsm.State, actor, reason 
 	c.audit(cr, actor, "change."+string(to), map[string]any{"from": t.From, "to": t.To, "reason": reason})
 }
 
-func (c *Coordinator) touch(cr *ChangeRequest) { cr.UpdatedAt = c.now() }
+func (c *Coordinator) touch(cr *ChangeRequest) {
+	cr.UpdatedAt = c.now()
+	if c.Persist != nil {
+		if err := c.persistLocked(cr); err != nil {
+			cr.persistErr = err
+			slog.Error("change: persist failed", "change_id", cr.ID, "error", err)
+		} else {
+			cr.persistErr = nil
+		}
+	}
+}
+
+func (c *Coordinator) persistLocked(cr *ChangeRequest) error {
+	nt := cr.Transitions[cr.savedTransitions:]
+	nd := cr.Decisions[cr.savedDecisions:]
+	if err := c.Persist.Save(cr, nt, cr.savedTransitions, nd); err != nil {
+		return err
+	}
+	cr.savedTransitions = len(cr.Transitions)
+	cr.savedDecisions = len(cr.Decisions)
+	return nil
+}
 
 func (c *Coordinator) audit(cr *ChangeRequest, actor, action string, data map[string]any) {
 	if c.Audit == nil {

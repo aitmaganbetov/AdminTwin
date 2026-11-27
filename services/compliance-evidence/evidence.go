@@ -46,6 +46,16 @@ type Item struct {
 	body           []byte
 }
 
+// Repository — хранилище evidence (in-memory Store или PGStore).
+type Repository interface {
+	Store(tenantID, kind, ref string, body []byte, legalHold bool) (id, digest string, err error)
+	Get(tenantID, id, actor, purpose string) (*Item, []byte, error)
+	Verify(tenantID, id string) (bool, error)
+	Delete(tenantID, id string) error
+}
+
+var _ Repository = (*Store)(nil)
+
 // Store — in-memory хранилище (в production — PostgreSQL + MinIO Object Lock).
 type Store struct {
 	mu    sync.Mutex

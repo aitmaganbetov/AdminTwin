@@ -55,6 +55,10 @@ func (p *OrchestratorProxy) forward(w http.ResponseWriter, r *http.Request, a id
 		httpapi.Fail(w, r, problem.New(problem.Forbidden, "agent tasks are created by people; agents create subtasks inside the orchestrator"))
 		return
 	}
+	if !a.HasAny(identity.RoleTenantAdmin, identity.RoleITManager, identity.RoleEngineer, identity.RoleOperator, identity.RoleViewer) {
+		httpapi.Fail(w, r, problem.New(problem.Forbidden, "insufficient role to view AI tasks"))
+		return
+	}
 	if r.Method != http.MethodGet && !a.HasAny(identity.RoleTenantAdmin, identity.RoleITManager, identity.RoleEngineer, identity.RoleOperator) {
 		httpapi.Fail(w, r, problem.New(problem.Forbidden, "insufficient role to manage AI tasks"))
 		return

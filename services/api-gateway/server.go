@@ -76,6 +76,11 @@ func (s *Server) Handler() http.Handler {
 				s.fail(w, r, problem.New(problem.Unauthenticated, "unknown tenant"))
 				return
 			}
+			if a.Kind == identity.KindUser && len(a.Roles) == 0 {
+				// Аутентифицирован, но без ролей AdminTwin (например, токен SSO без admintwin_roles): доступа нет.
+				s.fail(w, r, problem.New(problem.Forbidden, "no AdminTwin role assigned"))
+				return
+			}
 			h(w, r.WithContext(identity.WithActor(r.Context(), a)), a)
 		}
 	}
@@ -343,7 +348,7 @@ func (s *Server) createChange(w http.ResponseWriter, r *http.Request, a identity
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, statusForChange(cr), changeView(cr))
+	writeJSON(w, statusForChange(cr), changeView(cr, a))
 }
 
 // statusForChange: 202 + waiting_approval — принято и ждёт согласования (§13).
@@ -355,14 +360,46 @@ func statusForChange(cr *change.ChangeRequest) int {
 	return http.StatusCreated
 }
 
-func changeView(cr *change.ChangeRequest) map[string]any {
+// canSeeExecutionOutput — вывод исполнения (stdout/stderr/шаги) равнозначен содержимому evidence:
+// по матрице §2.2 его видят TA, ITM, Engineer, Compliance Manager и Auditor; агенты получают ссылки.
+func canSeeExecutionOutput(a identity.Actor) bool {
+	return a.Kind == identity.KindUser && !a.IsAI() &&
+		a.HasAny(identity.RoleTenantAdmin, identity.RoleITManager, identity.RoleEngineer, identity.RoleComplianceManager, identity.RoleAuditor)
+}
+
+func changeView(cr *change.ChangeRequest, a identity.Actor) map[string]any {
 	b, _ := json.Marshal(cr)
 	var m map[string]any
 	_ = json.Unmarshal(b, &m)
+	if !canSeeExecutionOutput(a) {
+		if exs, ok := m["executions"].([]any); ok {
+			for _, e := range exs {
+				if em, ok := e.(map[string]any); ok {
+					redactResult(em)
+				}
+			}
+		}
+	}
 	if cr.Status == change.WaitingApproval {
 		m["status"] = "waiting_approval"
 	}
 	return m
+}
+
+// redactResult оставляет в результате исполнения только статус и ссылки на evidence.
+func redactResult(em map[string]any) {
+	res, ok := em["result"].(map[string]any)
+	if !ok {
+		return
+	}
+	keep := map[string]any{}
+	for _, k := range []string{"execution_id", "status", "evidence_id", "digest", "started_at", "finished_at", "exit_code"} {
+		if v, ok := res[k]; ok {
+			keep[k] = v
+		}
+	}
+	keep["output_redacted"] = true
+	em["result"] = keep
 }
 
 func (s *Server) listChanges(w http.ResponseWriter, r *http.Request, a identity.Actor) {
@@ -370,7 +407,7 @@ func (s *Server) listChanges(w http.ResponseWriter, r *http.Request, a identity.
 	items := []map[string]any{}
 	for _, cr := range s.Changes.List(a.TenantID) {
 		if status == "" || string(cr.Status) == status {
-			items = append(items, changeView(cr))
+			items = append(items, changeView(cr, a))
 		}
 	}
 	writeJSON(w, 200, map[string]any{"items": items})
@@ -382,7 +419,7 @@ func (s *Server) getChange(w http.ResponseWriter, r *http.Request, a identity.Ac
 		s.fail(w, r, problem.New(problem.NotFound, "change not found"))
 		return
 	}
-	writeJSON(w, 200, changeView(cr))
+	writeJSON(w, 200, changeView(cr, a))
 }
 
 type decisionBody struct {
@@ -405,7 +442,7 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request, a identity.Actor
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 200, changeView(cr))
+	writeJSON(w, 200, changeView(cr, a))
 }
 
 type cancelBody struct {
@@ -434,7 +471,7 @@ func (s *Server) cancelChange(w http.ResponseWriter, r *http.Request, a identity
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 202, changeView(cr))
+	writeJSON(w, 202, changeView(cr, a))
 }
 
 func (s *Server) changeExecutions(w http.ResponseWriter, r *http.Request, a identity.Actor) {
@@ -443,7 +480,7 @@ func (s *Server) changeExecutions(w http.ResponseWriter, r *http.Request, a iden
 		s.fail(w, r, problem.New(problem.NotFound, "change not found"))
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": cr.Executions})
+	writeJSON(w, 200, map[string]any{"items": changeView(cr, a)["executions"]})
 }
 
 func (s *Server) getExecution(w http.ResponseWriter, r *http.Request, a identity.Actor) {
@@ -452,7 +489,13 @@ func (s *Server) getExecution(w http.ResponseWriter, r *http.Request, a identity
 		s.fail(w, r, problem.New(problem.NotFound, "execution not found"))
 		return
 	}
-	writeJSON(w, 200, ex)
+	b, _ := json.Marshal(ex)
+	var em map[string]any
+	_ = json.Unmarshal(b, &em)
+	if !canSeeExecutionOutput(a) {
+		redactResult(em)
+	}
+	writeJSON(w, 200, em)
 }
 
 type killBody struct {

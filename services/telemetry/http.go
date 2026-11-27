@@ -34,7 +34,8 @@ func RequireServiceToken(r *http.Request, a identity.Actor, token string) error 
 
 func canRead(a identity.Actor, roles []identity.Role) error {
 	if a.IsAI() {
-		return nil // агенты читают телеметрию (read-only); tool scope проверяется в Tool Service
+		// Агенты читают телеметрию только через Tool Service (tool scope T-CAP-001, класс данных, аудит).
+		return problem.New(problem.Forbidden, "AI agents read telemetry through the tool service")
 	}
 	if a.Kind != identity.KindUser {
 		return problem.New(problem.Forbidden, "insufficient identity for telemetry read")

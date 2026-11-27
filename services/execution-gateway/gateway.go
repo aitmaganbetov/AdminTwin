@@ -45,8 +45,10 @@ type Request struct {
 	InWindow      bool // текущий момент внутри maintenance window tenant
 	ApprovedBy    []string
 	CorrelationID string
-	// OnExecuteStart вызывается после успешного preflight, непосредственно перед движком.
-	OnExecuteStart func()
+	// OnExecuteStart вызывается после preflight непосредственно перед движком. Движок вызывается,
+	// только если владелец ChangeRequest подтвердил переход в executing (true): отмена, kill switch,
+	// изменившаяся политика или исчерпанный лимит дают false — исполнение не начинается.
+	OnExecuteStart func() bool
 }
 
 // StepResult — результат шага.
@@ -245,8 +247,9 @@ func (g *Gateway) Run(ctx context.Context, req Request) Result {
 		step("execute", "cancellation", false, false, "cancelled before the engine was invoked")
 		return finish(StatusCancelled)
 	}
-	if req.OnExecuteStart != nil {
-		req.OnExecuteStart()
+	if req.OnExecuteStart != nil && !req.OnExecuteStart() {
+		step("execute", "authorization", false, false, "execution not confirmed by the change coordinator (cancelled, kill switch, policy or rate limit)")
+		return finish(StatusCancelled)
 	}
 	ectx, cancel := context.WithTimeout(ctx, time.Duration(req.Runbook.Execute.TimeoutS)*time.Second)
 	defer cancel()

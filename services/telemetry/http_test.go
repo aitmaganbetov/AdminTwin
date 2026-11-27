@@ -122,8 +122,9 @@ func TestTelemetryAPIAuthorizationAndIsolation(t *testing.T) {
 	if code != 200 || len(body["series"].([]any)) != 1 {
 		t.Fatalf("metrics: %d %v", code, body)
 	}
-	if code, _ := e.do(agentA, "GET", "/api/v1/telemetry/metrics?asset_id="+dockerWeb+"&metric=node_disk_used_percent", nil); code != 200 {
-		t.Fatalf("agent read: %d", code)
+	// Агенты читают телеметрию только через Tool Service (tool scope, класс данных, аудит).
+	if code, _ := e.do(agentA, "GET", "/api/v1/telemetry/metrics?asset_id="+dockerWeb+"&metric=node_disk_used_percent", nil); code != 403 {
+		t.Fatalf("agent REST read must be denied: %d", code)
 	}
 	if code, _ := e.do(collectorA, "GET", "/api/v1/events", nil, "X-AdminTwin-Service-Token", svcToken); code != 403 {
 		t.Fatalf("service read must be denied: %d", code)

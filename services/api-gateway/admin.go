@@ -113,7 +113,7 @@ func (s *Server) recordPIR(w http.ResponseWriter, r *http.Request, a identity.Ac
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 200, changeView(cr))
+	writeJSON(w, 200, changeView(cr, a))
 }
 
 // aiCallRecord — запись о вызове LLM или инструмента агентом (метаданные; сырые промпты не принимаются).

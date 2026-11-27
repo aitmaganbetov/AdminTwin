@@ -131,3 +131,40 @@ func TestAICallAuditIngest(t *testing.T) {
 		t.Fatal("LLM call must be in the tenant audit chain")
 	}
 }
+
+// Ревью №6: вывод исполнений виден только ролям с правом на evidence; пользователь без ролей не читает ничего.
+func TestExecutionOutputAndZeroRoleAccess(t *testing.T) {
+	e := newEnv(t)
+	r := e.propose(engineerA, "docker.container.restart", dockerWeb, map[string]any{"container_id": appAPI})
+	id := r.str("id")
+	e.waitStatus(engineerA, id, "closed")
+	result := func(w who) map[string]any {
+		got := e.do(w, "GET", "/api/v1/changes/"+id, nil)
+		if got.Status != 200 {
+			t.Fatalf("%s read change: %d", w.id, got.Status)
+		}
+		return got.Body["executions"].([]any)[0].(map[string]any)["result"].(map[string]any)
+	}
+	if _, ok := result(engineerA)["stdout"]; !ok {
+		t.Fatal("engineer must see execution output")
+	}
+	for _, w := range []who{agentA, viewerA, operatorA} {
+		res := result(w)
+		if _, ok := res["stdout"]; ok || res["output_redacted"] != true || res["evidence_id"] == nil {
+			t.Fatalf("%s must get evidence references only: %v", w.id, res)
+		}
+	}
+	exID := e.do(engineerA, "GET", "/api/v1/changes/"+id+"/executions", nil).Body["items"].([]any)[0].(map[string]any)["id"].(string)
+	if got := e.do(agentA, "GET", "/api/v1/executions/"+exID, nil); got.Body["result"].(map[string]any)["steps"] != nil {
+		t.Fatal("single execution view must be redacted for agents")
+	}
+	noRoles := who{tenantA, "sso-user", "user", "", ""}
+	for _, p := range []string{"/api/v1/assets", "/api/v1/changes", "/api/v1/changes/" + id, "/api/v1/runbooks"} {
+		if got := e.do(noRoles, "GET", p, nil); got.Status != 403 {
+			t.Errorf("zero-role user %s: %d", p, got.Status)
+		}
+	}
+	if got := e.do(agentA, "GET", "/api/v1/incidents", nil); got.Status != 403 {
+		t.Errorf("agents must not read incidents via REST: %d", got.Status)
+	}
+}

@@ -62,6 +62,7 @@ type ChangeRequest struct {
 	IncidentID     string              `json:"incident_id,omitempty"`
 	AuthorID       string              `json:"author_id"`
 	AuthorKind     identity.Kind       `json:"author_kind"`
+	AuthorRoles    []identity.Role     `json:"author_roles,omitempty"`
 	Impact         *Impact             `json:"impact,omitempty"`
 	Policy         *policy.Decision    `json:"policy,omitempty"`
 	Decisions      []approval.Decision `json:"decisions"`
@@ -159,19 +160,36 @@ func (c *Coordinator) Propose(actor identity.Actor, in ProposeInput) (*ChangeReq
 	}
 
 	payloadHash := hashPayload(in)
+	markCommitted := func() {}
 	idemScope := actor.TenantID + "|" + actor.Ref() + "|" + in.IdempotencyKey
-	c.mu.Lock()
 	if in.IdempotencyKey != "" {
+		c.mu.Lock()
 		if id, ok := c.idem[idemScope]; ok {
-			cr := c.changes[id]
 			defer c.mu.Unlock()
+			if id == idemInFlight {
+				// Тот же ключ обрабатывается параллельным запросом: повтор получит готовый результат.
+				return nil, problem.New(problem.Conflict, "a request with this Idempotency-Key is in progress; retry later")
+			}
+			cr := c.changes[id]
 			if cr.idemHash != payloadHash {
 				return nil, problem.New(problem.IdempotencyMismatch, "Idempotency-Key already used with a different payload")
 			}
 			return cr.snapshot(), nil
 		}
+		c.idem[idemScope] = idemInFlight // атомарное резервирование ключа
+		c.mu.Unlock()
+		committed := false
+		defer func() {
+			if !committed {
+				c.mu.Lock()
+				if c.idem[idemScope] == idemInFlight {
+					delete(c.idem, idemScope) // запрос не создал change: ключ можно использовать снова
+				}
+				c.mu.Unlock()
+			}
+		}()
+		markCommitted = func() { committed = true }
 	}
-	c.mu.Unlock()
 
 	tp, ok := c.Tenants(actor.TenantID)
 	if !ok {
@@ -198,7 +216,7 @@ func (c *Coordinator) Propose(actor identity.Actor, in ProposeInput) (*ChangeReq
 		ID: newID(), TenantID: actor.TenantID, Type: in.Type, Status: Draft,
 		RunbookID: rb.ID, RunbookVersion: rb.Version, RunbookDigest: rb.Digest, Risk: rb.Risk,
 		AssetID: asset.ID, Params: params, DryRun: in.DryRun, Reason: in.Reason, IncidentID: in.IncidentID,
-		AuthorID: actor.ID, AuthorKind: actor.Kind, Decisions: []approval.Decision{}, Executions: []Execution{},
+		AuthorID: actor.ID, AuthorKind: actor.Kind, AuthorRoles: actor.Roles, Decisions: []approval.Decision{}, Executions: []Execution{},
 		CreatedAt: now, UpdatedAt: now, idemKey: in.IdempotencyKey, idemHash: payloadHash,
 	}
 
@@ -216,6 +234,7 @@ func (c *Coordinator) Propose(actor identity.Actor, in ProposeInput) (*ChangeReq
 	}
 	if in.IdempotencyKey != "" {
 		c.idem[idemScope] = cr.ID
+		markCommitted()
 	}
 	c.audit(cr, actor.Ref(), "change.created", map[string]any{"runbook": rb.ID + "@" + rb.Version, "asset_id": asset.ID, "type": in.Type, "risk": rb.Risk})
 
@@ -242,7 +261,7 @@ func (c *Coordinator) Propose(actor identity.Actor, in ProposeInput) (*ChangeReq
 	dec, perr := c.Policy.Evaluate(policy.Input{
 		Actor: actor, Tenant: tp, Asset: asset, Runbook: rb, ChangeType: in.Type,
 		KillSwitchActive: c.Kill != nil && c.Kill.Active(actor.TenantID),
-		RecentExecutions: c.recentExecutionsLocked(actor.TenantID, rb, asset.ID, now), Now: now,
+		RecentExecutions: c.rateUsageLocked(actor.TenantID, rb, asset.ID, now, cr.ID), Now: now,
 	})
 	cr.Policy = &dec
 	if perr != nil {
@@ -323,6 +342,14 @@ func (c *Coordinator) Decide(actor identity.Actor, changeID string, v approval.V
 		c.touch(cr)
 		return cr.snapshot(), nil
 	}
+	if err := c.recheckLocked(cr); err != nil {
+		// Политика, классификация актива или лимиты изменились после создания запроса.
+		c.transition(cr, Rejected, "policy:"+cr.Policy.PolicyID, "policy re-evaluation at approval: "+err.Error())
+		if p, ok := problem.As(err); ok {
+			p.ChangeID = cr.ID
+		}
+		return nil, err
+	}
 	c.transition(cr, Approved, actor.Ref(), fmt.Sprintf("%d/%d approvals", req.Approvals(), cr.Policy.RequiredApprovals))
 	rb, _ := c.Catalog.Get(cr.RunbookID)
 	asset, ok := c.Inventory.Get(cr.TenantID, cr.AssetID)
@@ -360,6 +387,9 @@ func (c *Coordinator) cancelLocked(cr *ChangeRequest, actor, reason string) erro
 		c.transition(cr, Closed, actor, "proposal dismissed: "+reason)
 	case Approved, Scheduled:
 		c.transition(cr, Cancelled, actor, reason)
+		if cr.cancel != nil {
+			cr.cancel() // прерывает идущий preflight; движок не будет вызван (OnExecuteStart → false)
+		}
 	case Executing:
 		c.transition(cr, CancellationPending, actor, reason)
 		if cr.cancel != nil {
@@ -449,13 +479,23 @@ func (c *Coordinator) startLocked(cr *ChangeRequest, rb *runbook.Spec, asset *in
 	req := gateway.Request{
 		ChangeID: cr.ID, ExecutionID: ex.ID, TenantID: cr.TenantID, Asset: *asset, Runbook: rb,
 		Params: cr.Params, FencingToken: fence, DryRun: cr.DryRun, InWindow: tp.InMaintenanceWindow(c.now()),
-		ApprovedBy: approvers, OnExecuteStart: func() {
+		ApprovedBy: approvers, OnExecuteStart: func() bool {
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			if cr.Status == Scheduled {
-				c.transition(cr, Executing, "service:execution-gateway", "preflight passed, executing "+rb.Execute.Action)
-				cr.Executions[idx].Status = "executing"
+			if cr.Status != Scheduled {
+				return false // отменено, отозвано kill switch или иначе завершено во время preflight
 			}
+			if c.Kill != nil && !c.Kill.Valid(cr.TenantID, fence) {
+				c.transition(cr, Cancelled, "system:kill-switch", "kill switch activated during preflight")
+				return false
+			}
+			if err := c.recheckLocked(cr); err != nil {
+				c.transition(cr, Cancelled, "policy:"+cr.Policy.PolicyID, "policy re-evaluation before execution: "+err.Error())
+				return false
+			}
+			c.transition(cr, Executing, "service:execution-gateway", "preflight passed, executing "+rb.Execute.Action)
+			cr.Executions[idx].Status = "executing"
+			return true
 		},
 	}
 	c.audit(cr, "system:change-coordinator", "execution.requested", map[string]any{"execution_id": ex.ID, "runbook": rb.ID + "@" + rb.Version, "approved_by": approvers})
@@ -663,23 +703,61 @@ func (c *Coordinator) Execution(tenantID, id string) (*Execution, bool) {
 	return nil, false
 }
 
-func (c *Coordinator) recentExecutionsLocked(tenantID string, rb *runbook.Spec, assetID string, now time.Time) int {
+// rateUsageLocked — использование лимита runbook в окне: начатые исполнения других change (кроме
+// остановленных на preflight) плюс одобренные/запланированные/исполняемые change, ещё не начавшие исполнение.
+// Учитываются и очереди одобренных запросов, иначе лимит обходится пачкой согласований.
+func (c *Coordinator) rateUsageLocked(tenantID string, rb *runbook.Spec, assetID string, now time.Time, exclude string) int {
 	window := map[string]time.Duration{"minute": time.Minute, "hour": time.Hour, "day": 24 * time.Hour}[rb.Rate.Window]
 	n := 0
 	for _, cr := range c.changes {
-		if cr.TenantID != tenantID || cr.RunbookID != rb.ID {
+		if cr.ID == exclude || cr.TenantID != tenantID || cr.RunbookID != rb.ID {
 			continue
 		}
 		if rb.Rate.Per == "asset" && cr.AssetID != assetID {
 			continue
 		}
+		counted := false
 		for _, e := range cr.Executions {
 			if e.Status != string(gateway.StatusPreflightFailed) && now.Sub(e.StartedAt) < window {
 				n++
+				counted = true
 			}
+		}
+		if !counted && (cr.Status == Approved || cr.Status == Scheduled || cr.Status == Executing) {
+			n++
 		}
 	}
 	return n
+}
+
+// recheckLocked повторно применяет Policy Engine к change перед согласованием и перед исполнением:
+// режим автономности, запреты по окружению, классификация и legal hold актива, kill switch, лимиты.
+// Требования к согласованию не ослабляются: решение, требовавшее людей, не превращается в авто.
+func (c *Coordinator) recheckLocked(cr *ChangeRequest) error {
+	rb, ok := c.Catalog.Get(cr.RunbookID)
+	if !ok || rb.Digest != cr.RunbookDigest {
+		return problem.New(problem.PolicyDenied, "runbook changed or removed since the change was created")
+	}
+	asset, ok := c.Inventory.Get(cr.TenantID, cr.AssetID)
+	if !ok {
+		return problem.New(problem.PolicyDenied, "asset no longer exists")
+	}
+	tp, ok := c.Tenants(cr.TenantID)
+	if !ok {
+		return problem.New(problem.PolicyDenied, "tenant policy is not configured")
+	}
+	now := c.now()
+	author := identity.Actor{ID: cr.AuthorID, Kind: cr.AuthorKind, TenantID: cr.TenantID, Roles: cr.AuthorRoles}
+	dec, err := c.Policy.Evaluate(policy.Input{Actor: author, Tenant: tp, Asset: asset, Runbook: rb, ChangeType: cr.Type,
+		KillSwitchActive: c.Kill != nil && c.Kill.Active(cr.TenantID),
+		RecentExecutions: c.rateUsageLocked(cr.TenantID, rb, asset.ID, now, cr.ID), Now: now})
+	if err != nil {
+		return err
+	}
+	if dec.Outcome == policy.OutcomeProposalOnly {
+		return problem.New(problem.PolicyDenied, "autonomy mode %q now permits proposals only", tp.Mode)
+	}
+	return nil
 }
 
 func (c *Coordinator) transition(cr *ChangeRequest, to fsm.State, actor, reason string) {
@@ -740,6 +818,9 @@ func (cr *ChangeRequest) snapshot() *ChangeRequest {
 	_ = json.Unmarshal(b, &out)
 	return &out
 }
+
+// idemInFlight — резерв ключа идемпотентности на время обработки первого запроса.
+const idemInFlight = "\x00in-flight"
 
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 

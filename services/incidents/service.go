@@ -327,7 +327,8 @@ func (s *Service) createFromEvent(ctx context.Context, e telemetry.Event, at, no
 
 func canRead(a identity.Actor) error {
 	if a.IsAI() {
-		return nil
+		// Контекст инцидента агенты получают от Commander и через read tools, не через REST.
+		return problem.New(problem.Forbidden, "AI agents do not read incidents through the REST API")
 	}
 	if a.Kind != identity.KindUser {
 		return problem.New(problem.Forbidden, "insufficient identity")

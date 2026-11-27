@@ -4,6 +4,7 @@
 package killswitch
 
 import (
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -25,6 +26,16 @@ type Switch struct {
 	platGen   uint64
 	listeners []func(tenantID string, platform bool)
 	releases  []func(tenantID string, platform bool)
+	// Persist сохраняет изменение (БД). Ошибка не отменяет остановку: она действует локально всегда.
+	Persist func(tenantID string, platform bool, st State, generation uint64) error
+}
+
+// Record — сохранённое состояние для загрузки и синхронизации реплик.
+type Record struct {
+	TenantID   string
+	Platform   bool
+	State      State
+	Generation uint64
 }
 
 // New создаёт переключатель.
@@ -46,6 +57,10 @@ func (s *Switch) OnRelease(f func(tenantID string, platform bool)) {
 
 // Set включает/выключает переключатель tenant ("" и platform=true — уровень платформы).
 func (s *Switch) Set(tenantID string, platform, active bool, actor, reason string) {
+	s.set(tenantID, platform, active, actor, reason, true)
+}
+
+func (s *Switch) set(tenantID string, platform, active bool, actor, reason string, store bool) {
 	st := State{Active: active, Reason: reason, Actor: actor, ChangedAt: time.Now().UTC()}
 	s.mu.Lock()
 	if platform {
@@ -59,9 +74,22 @@ func (s *Switch) Set(tenantID string, platform, active bool, actor, reason strin
 			s.gen[tenantID]++
 		}
 	}
+	gen := s.gen[tenantID]
+	if platform {
+		gen = s.platGen
+	}
+	persist := s.Persist
+	if !store {
+		persist = nil
+	}
 	ls := append([]func(string, bool){}, s.listeners...)
 	rs := append([]func(string, bool){}, s.releases...)
 	s.mu.Unlock()
+	if persist != nil {
+		if err := persist(tenantID, platform, st, gen); err != nil {
+			slog.Error("kill switch state not persisted (active locally only)", "tenant", tenantID, "platform", platform, "error", err)
+		}
+	}
 	if active {
 		for _, f := range ls {
 			f(tenantID, platform)
@@ -97,4 +125,35 @@ func (s *Switch) Token(tenantID string) uint64 {
 // Valid — токен ещё действителен и остановка не активна.
 func (s *Switch) Valid(tenantID string, token uint64) bool {
 	return !s.Active(tenantID) && s.Token(tenantID) == token
+}
+
+// Restore применяет сохранённые состояния при старте (до приёма запросов) без вызова обработчиков.
+func (s *Switch) Restore(recs []Record) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, r := range recs {
+		if r.Platform {
+			s.platform, s.platGen = r.State, max(s.platGen, r.Generation)
+		} else {
+			s.tenants[r.TenantID] = r.State
+			s.gen[r.TenantID] = max(s.gen[r.TenantID], r.Generation)
+		}
+	}
+}
+
+// Sync сверяет локальное состояние с общим хранилищем (другая реплика включила/сняла остановку):
+// расхождения применяются локально с вызовом обработчиков, но без повторной записи в хранилище.
+func (s *Switch) Sync(recs []Record) {
+	for _, r := range recs {
+		s.mu.RLock()
+		cur := s.tenants[r.TenantID]
+		if r.Platform {
+			cur = s.platform
+		}
+		s.mu.RUnlock()
+		if cur.Active == r.State.Active {
+			continue
+		}
+		s.set(r.TenantID, r.Platform, r.State.Active, r.State.Actor, r.State.Reason, false)
+	}
 }

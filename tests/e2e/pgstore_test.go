@@ -132,6 +132,28 @@ func TestPostgresStore(t *testing.T) {
 		t.Fatalf("chain must stay valid after shredding: %v", err)
 	}
 
+	// Kill switch переживает рестарт и распространяется между репликами (ревью №7).
+	a3.Kill.Set(tenantA, false, true, "user:op-1", "incident")
+	a4, e4 := mk()
+	if !a4.Kill.Active(tenantA) {
+		t.Fatal("a restarted instance must come up with the kill switch active")
+	}
+	if r := e4.propose(engineerA, "docker.container.restart", dockerWeb, map[string]any{"container_id": appAPI}); r.Status != 409 {
+		t.Fatalf("new changes must be rejected after restart: %d", r.Status)
+	}
+	if a2.Kill.Active(tenantA) {
+		t.Fatal("setup: instance 2 has not synced yet")
+	}
+	a2.SyncKillSwitch(context.Background())
+	if !a2.Kill.Active(tenantA) {
+		t.Fatal("a running replica must pick up the kill switch from the shared store")
+	}
+	a4.Kill.Set(tenantA, false, false, "user:op-1", "resolved")
+	a2.SyncKillSwitch(context.Background())
+	if a2.Kill.Active(tenantA) {
+		t.Fatal("release must propagate too")
+	}
+
 	// Освободить зависшее исполнение экземпляра 1.
 	a1.Kill.Set(tenantA, false, true, "user:test", "cleanup")
 	done := make(chan struct{})

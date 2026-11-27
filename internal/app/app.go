@@ -231,6 +231,13 @@ func New(cfg Config) (*App, error) {
 		if err := a.loadTenantsFromDB(ctx); err != nil {
 			return nil, fmt.Errorf("load tenants: %w", err)
 		}
+		// Kill switch: состояние загружается до приёма запросов (рестарт не снимает остановку).
+		recs, err := a.loadKillSwitch(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("load kill switch: %w", err)
+		}
+		a.Kill.Restore(recs)
+		a.Kill.Persist = a.saveKillSwitch
 	} else {
 		a.Inventory = inventory.NewStore()
 		a.Evidence = evidence.NewStore()
@@ -568,6 +575,8 @@ func (a *App) RunBackground(ctx context.Context, tick, auditEvery time.Duration)
 	defer t.Stop()
 	au := time.NewTicker(auditEvery)
 	defer au.Stop()
+	ks := time.NewTicker(3 * time.Second)
+	defer ks.Stop()
 	a.VerifyAudit()
 	for {
 		select {
@@ -575,6 +584,8 @@ func (a *App) RunBackground(ctx context.Context, tick, auditEvery time.Duration)
 			return
 		case <-t.C:
 			a.Coordinator.Tick()
+		case <-ks.C:
+			a.SyncKillSwitch(ctx)
 		case <-au.C:
 			a.VerifyAudit()
 		}
@@ -641,4 +652,61 @@ type noCredentials struct{}
 
 func (noCredentials) ReadOnly(context.Context, string, string) (discovery.Credential, error) {
 	return discovery.Credential{}, fmt.Errorf("vault is not configured")
+}
+
+func (a *App) loadKillSwitch(ctx context.Context) ([]killswitch.Record, error) {
+	var out []killswitch.Record
+	err := a.DB.Platform(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, "SELECT scope, active, reason, actor, generation, changed_at FROM kill_switch_state")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var r killswitch.Record
+			var scope string
+			var gen int64
+			if err := rows.Scan(&scope, &r.State.Active, &r.State.Reason, &r.State.Actor, &gen, &r.State.ChangedAt); err != nil {
+				return err
+			}
+			r.Generation = uint64(gen)
+			if scope == "platform" {
+				r.Platform = true
+			} else {
+				r.TenantID = scope
+			}
+			out = append(out, r)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+func (a *App) saveKillSwitch(tenantID string, platform bool, st killswitch.State, gen uint64) error {
+	scope := tenantID
+	if platform {
+		scope = "platform"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return a.DB.Platform(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO kill_switch_state (scope, active, reason, actor, generation, changed_at) VALUES ($1,$2,$3,$4,$5,$6)
+			ON CONFLICT (scope) DO UPDATE SET active=EXCLUDED.active, reason=EXCLUDED.reason, actor=EXCLUDED.actor,
+			generation=GREATEST(kill_switch_state.generation, EXCLUDED.generation), changed_at=EXCLUDED.changed_at`,
+			scope, st.Active, st.Reason, st.Actor, int64(gen), st.ChangedAt)
+		return err
+	})
+}
+
+// SyncKillSwitch применяет состояние kill switch из общего хранилища (остановка, включённая другой репликой).
+func (a *App) SyncKillSwitch(ctx context.Context) {
+	if a.DB == nil {
+		return
+	}
+	recs, err := a.loadKillSwitch(ctx)
+	if err != nil {
+		slog.Error("kill switch sync failed", "error", err)
+		return
+	}
+	a.Kill.Sync(recs)
 }

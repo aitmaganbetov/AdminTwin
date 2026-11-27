@@ -572,6 +572,33 @@ paths:
         "202": { description: Accepted }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/compliance/controls:
+    get:
+      tags: [audit]
+      summary: Статусы контролей tenant (не сертификация; соответствие подтверждается аудитом)
+      responses:
+        "200": { description: OK }
+  /api/v1/compliance/controls/{id}/assessment:
+    post:
+      tags: [audit]
+      summary: "Оценка контроля (Compliance Manager / Tenant Admin, MFA). implemented/verified — только с evidence (T-COMP-001); not_applicable — с обоснованием"
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { type: string, enum: [not_assessed, applicable, implemented, partially_implemented, non_compliant, not_applicable, verified] }
+                evidence_ids: { type: array, maxItems: 50, items: { type: string } }
+                justification: { type: string, maxLength: 2000 }
+      responses:
+        "200": { description: OK }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     oidc:

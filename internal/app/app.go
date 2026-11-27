@@ -402,6 +402,18 @@ func New(cfg Config) (*App, error) {
 		Version: cfg.Version, Simulator: cfg.Simulator,
 		Modules: []httpapi.Module{a.Tools, a.Telemetry, a.Incidents, a.Discovery},
 	}
+	var ctrlRepo evidence.ControlRepo = evidence.NewMemControls()
+	if a.DB != nil {
+		ctrlRepo = evidence.PGControls{DB: a.DB}
+	}
+	a.Server.Modules = append(a.Server.Modules, &evidence.Controls{Repo: ctrlRepo, Evidence: a.Evidence, Audit: a.Audit,
+		Catalog: func() []evidence.ControlDef {
+			out := []evidence.ControlDef{}
+			for _, st := range reg.SortedStandards() {
+				out = append(out, evidence.ControlDef{ID: st.ID, Standard: st.ID, Title: st.Title})
+			}
+			return out
+		}})
 	if cfg.Simulator && cfg.DevAuth {
 		a.Server.Modules = append(a.Server.Modules, a.Sim) // POST /api/v1/dev/simulator — только dev
 	}

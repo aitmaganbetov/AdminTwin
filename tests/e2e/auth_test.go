@@ -79,7 +79,7 @@ func call(t *testing.T, srv *httptest.Server, method, path string, body any, hdr
 
 func TestOIDCAndServiceTokenAuth(t *testing.T) {
 	i := newIDP(t)
-	a, err := app.New(app.Config{Root: "../..", FixturesPath: "../../infra/dev/fixtures.yaml", Simulator: true,
+	a, err := app.New(app.Config{Root: "../..", FixturesPath: "../../infra/dev/fixtures.yaml",
 		OIDCIssuer: i.srv.URL, OIDCAudience: "admintwin", ServiceToken: serviceToken})
 	if err != nil {
 		t.Fatal(err)

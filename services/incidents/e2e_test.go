@@ -25,7 +25,7 @@ import (
 	"github.com/aitmaganbetov/admintwin/services/telemetry"
 )
 
-const e2eToken = "e2e-service-token"
+const e2eToken = "e2e-service-token-0123456789abcdef"
 
 type e2eWho struct{ tenant, id, kind, roles string }
 
@@ -77,7 +77,7 @@ type e2e struct {
 
 func newE2E(t *testing.T) *e2e {
 	t.Helper()
-	a, err := app.New(app.Config{Root: "../..", FixturesPath: "../../infra/dev/fixtures.yaml", DevAuth: true, Version: "test"})
+	a, err := app.New(app.Config{Root: "../..", FixturesPath: "../../infra/dev/fixtures.yaml", DevAuth: true, Version: "test", ServiceToken: e2eToken})
 	if err != nil {
 		t.Fatal(err)
 	}

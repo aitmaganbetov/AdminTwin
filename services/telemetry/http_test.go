@@ -20,7 +20,7 @@ const (
 	tenantA   = "11111111-1111-4111-8111-111111111111"
 	tenantB   = "22222222-2222-4222-8222-222222222222"
 	dockerWeb = "a0000000-0000-4000-8000-000000000002"
-	svcToken  = "test-service-token"
+	svcToken  = "test-service-token-0123456789abcdef"
 )
 
 type env struct {
@@ -32,7 +32,7 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	a, err := app.New(app.Config{Root: "../..", FixturesPath: "../../infra/dev/fixtures.yaml", DevAuth: true, Version: "test"})
+	a, err := app.New(app.Config{Root: "../..", FixturesPath: "../../infra/dev/fixtures.yaml", DevAuth: true, Version: "test", ServiceToken: svcToken})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,8 @@ func TestTelemetryAPIAuthorizationAndIsolation(t *testing.T) {
 	}}
 	// Ingest — только service с токеном.
 	for _, w := range []who{engineerA, agentA} {
-		if code, _ := e.do(w, "POST", "/api/v1/telemetry/samples", samples, "X-AdminTwin-Service-Token", svcToken); code != 403 {
+		// Пользователь с сервисным токеном отклоняется уже шлюзом (401): токен не даёт права выдавать себя за человека.
+		if code, _ := e.do(w, "POST", "/api/v1/telemetry/samples", samples, "X-AdminTwin-Service-Token", svcToken); code != 403 && code != 401 {
 			t.Fatalf("%s must not ingest: %d", w.kind, code)
 		}
 	}

@@ -341,7 +341,7 @@ func TestE2EHTTP502IncidentFlow(t *testing.T) {
 
 func TestE2EDiscoveryIsolation(t *testing.T) {
 	e := newE2E(t)
-	scope := map[string]any{"name": "dc-1", "ranges": []string{"10.30.0.0/24"}, "methods": []string{"ssh"}, "limits": map[string]any{"max_sessions": 2, "pps": 50}, "responsible": "infra lead", "valid_until": time.Now().Add(24 * time.Hour)}
+	scope := map[string]any{"name": "dc-1", "ranges": []string{"10.30.0.0/24"}, "methods": []string{"ssh"}, "credential_refs": []string{"kv/discovery/ssh"}, "limits": map[string]any{"max_sessions": 2, "pps": 50}, "responsible": "infra lead", "valid_until": time.Now().Add(24 * time.Hour)}
 	if code, _ := e.do(engA, "POST", "/api/v1/discovery/scopes", scope); code != 403 {
 		t.Fatalf("engineer cannot create scope: %d", code)
 	}

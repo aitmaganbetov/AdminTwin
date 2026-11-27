@@ -109,7 +109,7 @@ func newFixture(t *testing.T) *fixture {
 }
 
 func scopeIn(ranges ...string) discovery.ScopeInput {
-	return discovery.ScopeInput{Name: "dc-1 servers", Ranges: ranges, Methods: []string{"ssh"}, Limits: discovery.Limits{MaxSessions: 2, PPS: 50}, Responsible: "infra lead", ValidUntil: time.Now().Add(30 * 24 * time.Hour)}
+	return discovery.ScopeInput{Name: "dc-1 servers", Ranges: ranges, Methods: []string{"ssh"}, CredentialRefs: []string{"kv/discovery/ssh", "kv/x"}, Limits: discovery.Limits{MaxSessions: 2, PPS: 50}, Responsible: "infra lead", ValidUntil: time.Now().Add(30 * 24 * time.Hour)}
 }
 
 func (f *fixture) activeScope(t *testing.T, in discovery.ScopeInput) *discovery.Scope {
@@ -260,8 +260,18 @@ func TestJobReconciliationConfidenceAndEvidence(t *testing.T) {
 		t.Fatalf("dependency: %+v", deps)
 	}
 	web := byKey["linux_host|web-01"]
-	if web.Change != discovery.FindingChanged || !web.Applied {
-		t.Fatalf("changed: %s", raw)
+	// Учётка существующего актива отличается (kv/web → kv/discovery/ssh): автоматически не применяется (ревью №2).
+	if web.Change != discovery.FindingChanged || web.Applied || !web.ConnectionChange || !web.RequiresAdmin || !web.NeedsConfirmation {
+		t.Fatalf("connection change must wait for a Tenant Admin: %s", raw)
+	}
+	if w, _ := f.inv.Get(tA, web.AssetID); w.Connection.CredentialRef != "kv/web" || w.HasObject("systemd_unit", "php-fpm.service") {
+		t.Fatalf("existing asset must be untouched before confirmation: %+v", w)
+	}
+	if _, err := f.svc.Confirm(engineer, job.ID, discovery.ConfirmInput{Keys: []string{web.Key}}); !problem.Is(err, problem.SeparationOfDuties) {
+		t.Fatalf("engineer (job creator) must not confirm a connection change: %v", err)
+	}
+	if _, err := f.svc.Confirm(admin1, job.ID, discovery.ConfirmInput{Keys: []string{web.Key}}); err != nil {
+		t.Fatalf("tenant admin confirmation: %v", err)
 	}
 	w, _ := f.inv.Get(tA, web.AssetID)
 	if w.Environment != "production" || w.Owner != "web-team" || w.Criticality != "high" || !w.HasObject("systemd_unit", "php-fpm.service") || w.Connection.CredentialRef != "kv/discovery/ssh" {
@@ -277,7 +287,7 @@ func TestJobReconciliationConfidenceAndEvidence(t *testing.T) {
 	if myst.Change != discovery.FindingNew || !myst.NeedsConfirmation || myst.Applied {
 		t.Fatalf("low confidence must wait for confirmation: %s", raw)
 	}
-	if job.Summary.PendingConfirmation != 1 || job.Summary.New < 3 || job.Summary.Missing != 1 {
+	if job.Summary.PendingConfirmation != 2 || job.Summary.New < 3 || job.Summary.Missing != 1 {
 		t.Fatalf("summary: %+v", job.Summary)
 	}
 	if job.Results[4].Status != "error" {
@@ -320,12 +330,45 @@ func TestJobReconciliationConfidenceAndEvidence(t *testing.T) {
 	for _, e := range f.al.Entries(tA) {
 		actions[e.Action]++
 	}
-	if actions["discovery.job_created"] != 1 || actions["discovery.job_completed"] != 1 || actions["discovery.confirmed"] != 1 || actions["discovery.scope_approved"] != 1 {
+	if actions["discovery.job_created"] != 1 || actions["discovery.job_completed"] != 1 || actions["discovery.confirmed"] != 2 || actions["discovery.scope_approved"] != 1 {
 		t.Fatalf("audit: %v", actions)
 	}
 	for _, u := range f.coll.gotCreds {
 		if u != "ro-kv/discovery/ssh" {
 			t.Fatalf("collector must receive read-only credential from the source: %v", f.coll.gotCreds)
+		}
+	}
+}
+
+// Ревью №2: подставной хост, сообщающий имя production-актива, не может перенаправить его на себя,
+// а учётные данные нельзя использовать вне утверждённого scope.
+func TestDiscoveryCannotRepointExistingAsset(t *testing.T) {
+	f := newFixture(t)
+	f.coll.byAddr["10.0.0.99"] = discovery.Observation{Confidence: 0.95, Assets: []inventory.Asset{{Name: "web-01", Type: "linux_host"}}}
+	sc := f.activeScope(t, scopeIn("10.0.0.0/24"))
+	ctx := context.Background()
+	if _, err := f.svc.CreateJob(ctx, engineer, discovery.JobInput{ScopeID: sc.ID, Targets: []discovery.TargetInput{
+		{Address: "10.0.0.99", Method: "ssh", Port: 22, CredentialRef: "kv/tenants/a/root-ssh", HostKey: "ssh-ed25519 EVIL"}}}); !problem.Is(err, problem.PolicyDenied) {
+		t.Fatalf("credential_ref outside the scope must be denied: %v", err)
+	}
+	job, err := f.svc.CreateJob(ctx, engineer, discovery.JobInput{ScopeID: sc.ID, Targets: []discovery.TargetInput{target("10.0.0.99")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.svc.Wait()
+	job, _ = f.svc.GetJob(engineer, job.ID)
+	var fd discovery.Finding
+	for _, x := range job.Findings {
+		if x.Key == "linux_host|web-01" {
+			fd = x
+		}
+	}
+	if fd.Applied || !fd.RequiresAdmin {
+		t.Fatalf("self-reported name must not repoint the asset: %+v", fd)
+	}
+	for _, a := range f.inv.List(tA) {
+		if a.Name == "web-01" && (a.Connection == nil || a.Connection.Address != "10.0.0.11" || a.Connection.HostKey != "ssh-ed25519 AAAA") {
+			t.Fatalf("production asset was repointed: %+v", a.Connection)
 		}
 	}
 }

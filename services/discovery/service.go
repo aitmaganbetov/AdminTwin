@@ -126,12 +126,13 @@ func requireTenantAdmin(a identity.Actor) error {
 
 // ScopeInput — тело POST /scopes.
 type ScopeInput struct {
-	Name        string    `json:"name"`
-	Ranges      []string  `json:"ranges"`
-	Methods     []string  `json:"methods"`
-	Limits      Limits    `json:"limits"`
-	Responsible string    `json:"responsible"`
-	ValidUntil  time.Time `json:"valid_until"`
+	Name           string    `json:"name"`
+	Ranges         []string  `json:"ranges"`
+	Methods        []string  `json:"methods"`
+	CredentialRefs []string  `json:"credential_refs"`
+	Limits         Limits    `json:"limits"`
+	Responsible    string    `json:"responsible"`
+	ValidUntil     time.Time `json:"valid_until"`
 }
 
 func parseRanges(rs []string) ([]netip.Prefix, []string, error) {
@@ -183,6 +184,18 @@ func (s *Service) CreateScope(a identity.Actor, in ScopeInput) (*Scope, error) {
 			methods = append(methods, m)
 		}
 	}
+	if len(in.CredentialRefs) == 0 || len(in.CredentialRefs) > 64 {
+		return nil, invalid("credential_refs", "1..64 Vault references allowed for this scope are required")
+	}
+	var refs []string
+	for i, r := range in.CredentialRefs {
+		if !credRefRe.MatchString(r) || strings.Contains(r, "..") {
+			return nil, invalid(fmt.Sprintf("credential_refs[%d]", i), "invalid Vault reference")
+		}
+		if !slices.Contains(refs, r) {
+			refs = append(refs, r)
+		}
+	}
 	if in.Limits.MaxSessions < 1 || in.Limits.MaxSessions > MaxSessionsLimit {
 		return nil, invalid("limits.max_sessions", "must be 1..%d", MaxSessionsLimit)
 	}
@@ -197,14 +210,14 @@ func (s *Service) CreateScope(a identity.Actor, in ScopeInput) (*Scope, error) {
 		return nil, invalid("valid_until", "must be in the future and within 366 days")
 	}
 	sc := Scope{
-		ID: newID(), TenantID: a.TenantID, Name: in.Name, Ranges: ranges, Methods: methods, Limits: in.Limits,
+		ID: newID(), TenantID: a.TenantID, Name: in.Name, Ranges: ranges, Methods: methods, CredentialRefs: refs, Limits: in.Limits,
 		Responsible: in.Responsible, ValidUntil: in.ValidUntil.UTC(), CreatedBy: a.Ref(), CreatedAt: now, prefixes: prefixes,
 	}
 	sc.computeStatus(now)
 	if err := s.repo.PutScope(sc); err != nil {
 		return nil, err
 	}
-	s.auditLog(a.TenantID, a.Ref(), "discovery.scope_created", "discovery_scope", sc.ID, map[string]any{"ranges": ranges, "methods": methods, "valid_until": sc.ValidUntil})
+	s.auditLog(a.TenantID, a.Ref(), "discovery.scope_created", "discovery_scope", sc.ID, map[string]any{"ranges": ranges, "methods": methods, "credential_refs": refs, "valid_until": sc.ValidUntil})
 	return &sc, nil
 }
 
@@ -323,6 +336,10 @@ func (s *Service) CreateJob(ctx context.Context, a identity.Actor, in JobInput) 
 		}
 		if !credRefRe.MatchString(t.CredentialRef) {
 			return nil, invalid(f+".credential_ref", "Vault reference is required")
+		}
+		if !slices.Contains(sc.CredentialRefs, t.CredentialRef) {
+			// Учётные данные — только из утверждённого scope: иначе их можно отправить на подставной хост.
+			return nil, s.deny(a, sc.ID, "credential_ref not approved for this scope", map[string]any{"target": ip.String(), "credential_ref": t.CredentialRef})
 		}
 		if len(t.HostKey) > 4096 || len(t.TLSServerName) > 255 {
 			return nil, invalid(f, "host_key/tls_server_name too long")
@@ -565,7 +582,10 @@ func (s *Service) Confirm(a identity.Actor, jobID string, in ConfirmInput) (*Job
 		if !f.NeedsConfirmation || f.Applied || (f.Change != FindingNew && f.Change != FindingChanged) {
 			continue
 		}
-		if err := s.apply(job.TenantID, f); err != nil {
+		if f.RequiresAdmin && (!a.Has(identity.RoleTenantAdmin) || a.Ref() == job.CreatedBy) {
+			return nil, problem.New(problem.SeparationOfDuties, "finding %q changes how an existing asset is reached: it must be confirmed by a Tenant Admin other than the job creator", truncate(k, 200))
+		}
+		if err := s.apply(job.TenantID, f, f.RequiresAdmin); err != nil {
 			return nil, err
 		}
 		f.ConfirmedBy = a.Ref()

@@ -89,12 +89,13 @@ func (s *Service) reconcile(sc *Scope, results []collected) []Finding {
 				f.Address = a.Connection.Address
 			}
 			var cur inventory.Asset
-			found := false
+			found, byName := false, false
 			if a.Connection != nil {
 				cur, found = byAddr[addrKey(a.Type, a.Connection.Address)]
 			}
 			if !found {
 				cur, found = byKey[key]
+				byName = found
 			}
 			if found {
 				matched[cur.ID] = true
@@ -111,6 +112,16 @@ func (s *Service) reconcile(sc *Scope, results []collected) []Finding {
 				f.ClassificationIncomplete = true
 			}
 			f.NeedsConfirmation = (f.Change == FindingNew || f.Change == FindingChanged) && conf < s.cfg.ConfirmThreshold
+			if found && (connectionDiffers(cur.Connection, a.Connection) || (byName && a.Connection != nil)) {
+				// Имя сообщает сам сканируемый хост; адрес/учётные данные существующего актива меняет только
+				// Tenant Admin (не автор задания) — иначе можно перенаправить production-актив на подставной хост.
+				f.ConnectionChange, f.RequiresAdmin, f.NeedsConfirmation = true, true, true
+				if f.Change == FindingUnchanged {
+					f.Change = FindingChanged
+				}
+				f.Diff = append(f.Diff, "connection")
+				f.Warnings = append(f.Warnings, "connection parameters of an existing asset differ or asset matched by self-reported name only")
+			}
 			for _, d := range r.obs.Dependencies {
 				if d.SourceName == raw.Name {
 					f.deps = append(f.deps, d)
@@ -202,7 +213,7 @@ func (s *Service) applyConfident(job *Job) {
 		if f.NeedsConfirmation || (f.Change != FindingNew && f.Change != FindingChanged) {
 			continue
 		}
-		if err := s.apply(job.TenantID, f); err != nil {
+		if err := s.apply(job.TenantID, f, false); err != nil { // автоприменение никогда не меняет подключение
 			f.Warnings = append(f.Warnings, "apply failed: "+truncate(err.Error(), 200))
 			continue
 		}
@@ -216,7 +227,7 @@ func (s *Service) applyConfident(job *Job) {
 }
 
 // apply записывает находку в CMDB, сохраняя атрибуты классификации существующего актива.
-func (s *Service) apply(tenantID string, f *Finding) error {
+func (s *Service) apply(tenantID string, f *Finding, allowConnection bool) error {
 	obs := f.observed
 	switch f.Change {
 	case FindingNew:
@@ -235,7 +246,7 @@ func (s *Service) apply(tenantID string, f *Finding) error {
 		if obs.Objects != nil {
 			upd.Objects = obs.Objects
 		}
-		if obs.Connection != nil {
+		if obs.Connection != nil && (allowConnection || cur.Connection == nil) {
 			c := *obs.Connection
 			if c.CredentialRef == "" && cur.Connection != nil {
 				c.CredentialRef = cur.Connection.CredentialRef
@@ -291,4 +302,18 @@ func (s *Service) applyDeps(tenantID string, f *Finding) {
 		}
 		_ = s.inv.AddDependency(inventory.Dependency{TenantID: tenantID, Source: src, Target: dst, RelationType: d.RelationType, Confidence: round3(conf), VerifiedBy: "discovery", DiscoveredAt: time.Now().UTC()})
 	}
+}
+
+// connectionDiffers — изменились ли параметры подключения существующего актива.
+func connectionDiffers(cur, obs *inventory.Connection) bool {
+	if obs == nil {
+		return false
+	}
+	if cur == nil {
+		return false // у актива ещё не было подключения: задаётся при первом обнаружении
+	}
+	return cur.Address != obs.Address || (obs.Port != 0 && cur.Port != obs.Port) ||
+		(obs.CredentialRef != "" && cur.CredentialRef != obs.CredentialRef) ||
+		(obs.HostKey != "" && cur.HostKey != obs.HostKey) ||
+		(obs.TLSServerName != "" && cur.TLSServerName != obs.TLSServerName) || cur.Method != obs.Method
 }

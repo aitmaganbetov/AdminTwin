@@ -17,20 +17,23 @@ type Limits struct {
 
 // Scope — Scope Document tenant: разрешённые диапазоны, методы, лимиты, ответственный, срок действия.
 type Scope struct {
-	ID          string     `json:"id"`
-	TenantID    string     `json:"tenant_id"`
-	Name        string     `json:"name"`
-	Ranges      []string   `json:"ranges"`
-	Methods     []string   `json:"methods"`
-	Limits      Limits     `json:"limits"`
-	Responsible string     `json:"responsible"`
-	ValidUntil  time.Time  `json:"valid_until"`
-	CreatedBy   string     `json:"created_by"`
-	CreatedAt   time.Time  `json:"created_at"`
-	ApprovedBy  string     `json:"approved_by,omitempty"`
-	ApprovedAt  *time.Time `json:"approved_at"`
-	Status      string     `json:"status"` // draft | active | expired (вычисляется)
-	prefixes    []netip.Prefix
+	ID       string   `json:"id"`
+	TenantID string   `json:"tenant_id"`
+	Name     string   `json:"name"`
+	Ranges   []string `json:"ranges"`
+	Methods  []string `json:"methods"`
+	// CredentialRefs — ссылки Vault, которые разрешено использовать в заданиях этого scope (утверждаются
+	// вместе с диапазонами: учётные данные нельзя направить на произвольный хост).
+	CredentialRefs []string   `json:"credential_refs"`
+	Limits         Limits     `json:"limits"`
+	Responsible    string     `json:"responsible"`
+	ValidUntil     time.Time  `json:"valid_until"`
+	CreatedBy      string     `json:"created_by"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ApprovedBy     string     `json:"approved_by,omitempty"`
+	ApprovedAt     *time.Time `json:"approved_at"`
+	Status         string     `json:"status"` // draft | active | expired (вычисляется)
+	prefixes       []netip.Prefix
 }
 
 // Active — утверждён и в пределах срока действия.
@@ -101,9 +104,14 @@ type Finding struct {
 	Confidence float64  `json:"confidence"`
 	Diff       []string `json:"diff,omitempty"`
 	// NeedsConfirmation — confidence ниже порога: в CMDB только после подтверждения человеком.
-	NeedsConfirmation bool   `json:"needs_confirmation"`
-	Applied           bool   `json:"applied"`
-	ConfirmedBy       string `json:"confirmed_by,omitempty"`
+	NeedsConfirmation bool `json:"needs_confirmation"`
+	// ConnectionChange — у существующего актива изменились бы параметры подключения (адрес, порт, host key,
+	// ссылка на учётные данные, TLS-имя) или актив сопоставлен только по имени, сообщённому самим хостом.
+	// Такие находки применяет только Tenant Admin, не создавший задание (RequiresAdmin).
+	ConnectionChange bool   `json:"connection_change,omitempty"`
+	RequiresAdmin    bool   `json:"requires_admin,omitempty"`
+	Applied          bool   `json:"applied"`
+	ConfirmedBy      string `json:"confirmed_by,omitempty"`
 	// ClassificationIncomplete — environment/criticality/owner/data_class не заданы: execution заблокировано
 	// до классификации человеком (§8.3). Discovery эти атрибуты никогда не выставляет.
 	ClassificationIncomplete bool     `json:"classification_incomplete"`

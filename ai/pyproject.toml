@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "admintwin-ai"
+version = "0.1.0"
+description = "AdminTwin AI layer: AI Provider Layer (M21), Tool Layer, agent contracts, Commander skeleton, evals (M22)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+dependencies = [
+  "anthropic>=2.0,<3",
+  "openai>=2.0,<4",
+  "httpx>=0.27",
+  "pydantic>=2.7,<3",
+  "jsonschema>=4.22,<5",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "types-PyYAML",
+  "types-jsonschema",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/admintwin_ai"]
+
+# Contract data (JSON Schema, agent definitions, golden dataset) lives in the
+# spec layout (ai/tools, ai/contracts, ai/agents, ai/evals); it is copied into
+# the wheel so that a non-editable install works the same way.
+[tool.hatch.build.targets.wheel.force-include]
+"tools" = "admintwin_ai/_data/tools"
+"contracts" = "admintwin_ai/_data/contracts"
+"agents" = "admintwin_ai/_data/agents"
+"evals" = "admintwin_ai/_data/evals"
+"config" = "admintwin_ai/_data/config"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "S", "SIM", "RUF", "PT"]
+ignore = [
+  "S101",   # assert in tests
+  "RUF001", # ambiguous unicode in strings: payloads are deliberately multilingual
+  "RUF002",
+  "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S108", "S311"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["admintwin_ai"]

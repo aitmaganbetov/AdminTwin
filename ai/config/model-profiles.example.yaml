@@ -1,0 +1,78 @@
+# Пример конфигурации AI Provider Layer (M21).
+#
+# Идентификаторы моделей задаются ТОЛЬКО здесь (Model Profiles); в коде
+# адаптеров значений по умолчанию нет. Перед использованием сверьте ID и цены
+# с актуальной документацией провайдера:
+#   Anthropic: https://docs.claude.com/   OpenAI: https://platform.openai.com/docs
+#
+# Ключи не хранятся в файле: api_key_ref — ссылка (env:NAME в dev, vault:... в prod,
+# BYO-ключ клиента, §6.1).
+
+providers:
+  claude-api:
+    kind: claude
+    mode: api_key
+    api_key_ref: env:ANTHROPIC_API_KEY
+    # Server-side fallback при отказе модели (stop_reason=refusal):
+    # beta server-side-fallback-2026-07-01, fallbacks="default".
+    # Фактическая модель ответа фиксируется в аудите. Отключите при необходимости.
+    server_side_fallback: true
+
+  openai-api:
+    kind: openai
+    mode: api_key
+    api_key_ref: env:OPENAI_API_KEY
+
+  local-vllm:
+    kind: local
+    base_url: http://llm.admintwin.internal:8000/v1
+    # Egress allowlist / pinning endpoint (§18.6)
+    allowed_endpoints:
+      - http://llm.admintwin.internal:8000/v1
+    # Объявляется по результатам проверки совместимости (§6.9)
+    declared_capabilities:
+      tool_calling: true
+      structured_output: true
+      streaming: true
+      embeddings: true
+      max_context: 32768
+    timeout_s: 300
+
+profiles:
+  claude-primary:
+    provider: claude-api
+    model: claude-opus-5-5
+    max_output_tokens: 16000
+    params:
+      effort: high          # у claude-opus-5-5 по умолчанию medium — задаём явно
+    pricing: {input_per_mtok: 4.0, output_per_mtok: 20.0}
+    downgrade_to: claude-economy
+
+  claude-economy:
+    provider: claude-api
+    model: claude-sonnet-5-5
+    max_output_tokens: 16000
+    params:
+      effort: medium
+    pricing: {input_per_mtok: 2.0, output_per_mtok: 10.0}
+    downgrade_to: local-default
+
+  openai-secondary:
+    provider: openai-api
+    model: gpt-5.1           # пример; проверьте актуальный ID модели
+    capabilities:
+      tool_calling: true
+      structured_output: true
+      streaming: true
+      embeddings: false
+      max_context: 400000
+    max_output_tokens: 16000
+    pricing: {input_per_mtok: 1.25, output_per_mtok: 10.0}   # пример; сверить с прайсом
+    downgrade_to: local-default
+
+  local-default:
+    provider: local-vllm
+    model: Qwen/Qwen3-32B    # пример; модель, закреплённая на endpoint
+    embedding_model: BAAI/bge-m3
+    max_output_tokens: 8192
+    pricing: {input_per_mtok: 0.0, output_per_mtok: 0.0}

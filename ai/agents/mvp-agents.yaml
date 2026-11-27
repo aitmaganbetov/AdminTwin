@@ -1,0 +1,141 @@
+# MVP-агенты (ТЗ §5.1: 1, 2, 4, 7, 12) как данные Agent Registry (§5.2).
+#
+# Инварианты (проверяются при загрузке, см. admintwin_ai.agents.model):
+#   * только tools kind ∈ {read, propose}; инструментов execute/shell/approval/secret нет;
+#   * data_sensitivity_max ≤ pii — агенты никогда не получают секреты;
+#   * model_profile / fallback_model_profile обязаны покрывать required_model_capabilities.
+# Шаблоны платформенные (tenant_id: null) и инстанцируются per-tenant.
+
+agents:
+  - id: ai-commander
+    name: AdminTwin Commander
+    version: 1.0.0
+    prompt_version: commander-v1
+    allowed_capabilities: [ITSM-001, ITSM-005, SRE-001, NET-011]
+    capability_levels: [observe, diagnose, recommend]
+    allowed_tools:
+      - asset.get
+      - topology.blast_radius
+      - events.list
+      - metrics.query
+      - logs.search
+    model_profile: claude-primary
+    fallback_model_profile: openai-secondary
+    required_model_capabilities: [tool_calling, structured_output]
+    min_context: 65536
+    policy_id: policy-ai-commander-v1
+    budget: {tokens: 120000, tool_calls: 40, wall_time_s: 600, subtask_depth: 3}
+    data_sensitivity_max: confidential
+    status: active
+
+  - id: linux-admin
+    name: Linux Admin
+    version: 1.0.0
+    prompt_version: linux-admin-v1
+    allowed_capabilities: [SYS-002, SYS-009, SYS-011, SYS-014]
+    allowed_tools:
+      - asset.get
+      - topology.blast_radius
+      - events.list
+      - metrics.query
+      - logs.search
+      - linux.service.status
+      - linux.disk.usage
+      - change.propose
+    allowed_runbooks: [linux.service.restart, linux.logs.rotate_cleanup]
+    model_profile: claude-primary
+    fallback_model_profile: openai-secondary
+    required_model_capabilities: [tool_calling]
+    min_context: 32768
+    policy_id: policy-ai-linux-v1
+    budget: {tokens: 60000, tool_calls: 25, wall_time_s: 300, subtask_depth: 2}
+    data_sensitivity_max: pii
+    status: active
+    routing:
+      asset_types: [linux_host, vm, server]
+      service_kinds: [systemd, nginx]
+      alert_types: [disk_usage_high, disk_full, service_down, host_down, high_cpu, high_memory,
+                    container_stopped]
+
+  - id: network-engineer
+    name: Network Engineer
+    version: 1.0.0
+    prompt_version: network-engineer-v1
+    allowed_capabilities: [NET-006, NET-011, NET-015]
+    capability_levels: [observe, diagnose, recommend]
+    allowed_tools:
+      - asset.get
+      - topology.blast_radius
+      - events.list
+      - metrics.query
+      - logs.search
+      - fortigate.policy.status
+    model_profile: claude-primary
+    fallback_model_profile: openai-secondary
+    required_model_capabilities: [tool_calling]
+    min_context: 32768
+    policy_id: policy-ai-network-v1
+    budget: {tokens: 60000, tool_calls: 25, wall_time_s: 300, subtask_depth: 2}
+    data_sensitivity_max: confidential
+    status: active
+    routing:
+      asset_types: [firewall, fortigate, switch, router, load_balancer]
+      service_kinds: [reverse_proxy, load_balancer, vpn]
+      alert_types: [http_502, http_5xx, network_unreachable, packet_loss, vpn_down]
+
+  - id: devops-engineer
+    name: DevOps Engineer
+    version: 1.0.0
+    prompt_version: devops-engineer-v1
+    allowed_capabilities: [DEV-006]
+    allowed_tools:
+      - asset.get
+      - topology.blast_radius
+      - events.list
+      - metrics.query
+      - logs.search
+      - docker.container.inspect
+      - linux.service.status
+      - change.propose
+    allowed_runbooks: [docker.container.restart]
+    model_profile: claude-primary
+    fallback_model_profile: openai-secondary
+    required_model_capabilities: [tool_calling]
+    min_context: 32768
+    policy_id: policy-ai-devops-v1
+    budget: {tokens: 60000, tool_calls: 25, wall_time_s: 300, subtask_depth: 2}
+    data_sensitivity_max: confidential
+    status: active
+    routing:
+      asset_types: [docker_host]
+      service_kinds: [container, docker, web_app]
+      alert_types: [http_502, http_5xx, container_stopped, container_restart_loop,
+                    healthcheck_failed]
+
+  - id: dba-engineer
+    name: DBA Engineer
+    version: 1.0.0
+    prompt_version: dba-engineer-v1
+    allowed_capabilities: [DBA-001]
+    capability_levels: [observe, diagnose, recommend]
+    allowed_tools:
+      - asset.get
+      - topology.blast_radius
+      - events.list
+      - metrics.query
+      - logs.search
+      - postgres.activity
+      - linux.disk.usage
+    model_profile: claude-primary
+    fallback_model_profile: openai-secondary
+    required_model_capabilities: [tool_calling]
+    min_context: 32768
+    policy_id: policy-ai-dba-v1
+    budget: {tokens: 60000, tool_calls: 25, wall_time_s: 300, subtask_depth: 2}
+    data_sensitivity_max: pii
+    status: active
+    routing:
+      asset_types: [postgres, database]
+      service_kinds: [postgres, database]
+      alert_types: [http_502, http_5xx, db_connections_exhausted, replication_lag, slow_queries,
+                    disk_usage_high]

@@ -1,0 +1,130 @@
+{
+  "$schema": "https://schemas.admintwin.io/ai/tools/tool-contract.schema.json",
+  "name": "topology.blast_radius",
+  "kind": "read",
+  "version": "1.0.0",
+  "description": "Транзитивно зависимые объекты актива; у каждого ребра — источник.",
+  "data_class": "internal",
+  "max_response_bytes": 32768,
+  "rate_limit_per_minute": 60,
+  "capabilities": [
+    "NET-011",
+    "ITSM-005"
+  ],
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "asset_id"
+    ],
+    "properties": {
+      "asset_id": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "depth": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 5
+      },
+      "direction": {
+        "type": "string",
+        "enum": [
+          "upstream",
+          "downstream",
+          "both"
+        ]
+      }
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "asset_id",
+      "nodes",
+      "edges"
+    ],
+    "properties": {
+      "asset_id": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "nodes": {
+        "type": "array",
+        "maxItems": 1000,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "asset_id",
+            "type",
+            "depth"
+          ],
+          "properties": {
+            "asset_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 255
+            },
+            "type": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "depth": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "edges": {
+        "type": "array",
+        "maxItems": 5000,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "from",
+            "to",
+            "kind",
+            "source"
+          ],
+          "properties": {
+            "from": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "to": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "kind": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "source": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

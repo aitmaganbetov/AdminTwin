@@ -1,0 +1,140 @@
+{
+  "$schema": "https://schemas.admintwin.io/ai/tools/tool-contract.schema.json",
+  "name": "docker.container.inspect",
+  "kind": "read",
+  "version": "1.0.0",
+  "description": "Состояние контейнера (Docker API, read-only). Переменные окружения не возвращаются.",
+  "data_class": "confidential",
+  "max_response_bytes": 32768,
+  "rate_limit_per_minute": 60,
+  "capabilities": [
+    "DEV-006"
+  ],
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "asset_id",
+      "container"
+    ],
+    "properties": {
+      "asset_id": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "container": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+      }
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "container",
+      "image",
+      "state"
+    ],
+    "properties": {
+      "container": {
+        "type": "string"
+      },
+      "image": {
+        "type": "string",
+        "maxLength": 512
+      },
+      "image_digest": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "state": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "running"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "running",
+              "paused",
+              "restarting",
+              "removing",
+              "exited",
+              "dead"
+            ]
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "oom_killed": {
+            "type": "boolean"
+          },
+          "restart_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "health": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "healthy",
+              "unhealthy",
+              "starting",
+              "none",
+              null
+            ]
+          }
+        }
+      },
+      "restart_policy": {
+        "type": "string",
+        "maxLength": 32
+      },
+      "ports": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "maxItems": 100
+      },
+      "labels": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string",
+          "maxLength": 1024
+        }
+      }
+    }
+  }
+}

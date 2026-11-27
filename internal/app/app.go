@@ -432,6 +432,11 @@ func New(cfg Config) (*App, error) {
 		Version: cfg.Version, Simulator: cfg.Simulator,
 		Modules: []httpapi.Module{a.Tools, a.Telemetry, a.Incidents, a.Discovery},
 	}
+	agents, err := api.LoadAgentRegistry(filepath.Join(cfg.Root, "ai", "agents", "mvp-agents.yaml"))
+	if err != nil {
+		return nil, err
+	}
+	a.Server.Modules = append(a.Server.Modules, agents)
 	var ctrlRepo evidence.ControlRepo = evidence.NewMemControls()
 	if a.DB != nil {
 		ctrlRepo = evidence.PGControls{DB: a.DB}

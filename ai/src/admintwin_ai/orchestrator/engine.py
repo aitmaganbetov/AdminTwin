@@ -882,7 +882,9 @@ class Orchestrator:
         } for h in ordered]
         status = {"confident": "completed", "uncertain": "uncertain",
                   "insufficient_evidence": "uncertain",
-                  "no_hypotheses": "failed"}[resolution.status]
+                  # Ни одна гипотеза не подтверждена — это результат анализа («нужен дополнительный
+                  # сбор»), а не сбой процесса: failed остаётся для таймаутов и ошибок.
+                  "no_hypotheses": "uncertain"}[resolution.status]
         conclusion = resolution.message
         if adjudication is not None and adjudication.conclusion:
             conclusion = f"{conclusion}. Commander: {adjudication.conclusion}"

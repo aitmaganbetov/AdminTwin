@@ -599,6 +599,12 @@ paths:
         "200": { description: OK }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/agents:
+    get:
+      tags: [ai]
+      summary: Реестр агентов (M02, §5.2) — capabilities, tools, runbooks, model profile; источник — ai/agents
+      responses:
+        "200": { description: OK }
 components:
   securitySchemes:
     oidc:

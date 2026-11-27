@@ -13,6 +13,7 @@ import { useApi, useAuth } from "@/lib/auth/AuthProvider";
 import type { MessageKey } from "@/lib/i18n/core";
 import { useI18n } from "@/lib/i18n/I18nProvider";
 import { can } from "@/lib/permissions";
+import { taskAgentRows, type RegistryAgent } from "@/lib/taskAgents";
 import { costByProvider, eventCategory, useEventStream, type EventCategory } from "@/lib/stream";
 import { useResource } from "@/lib/useResource";
 
@@ -269,6 +270,11 @@ function TaskDetail({ id }: { id: string }) {
   const tk: AgentTask | undefined = task.data;
   const terminal = !!tk && TERMINAL_TASK_STATUSES.includes(tk.status as never);
   const allowed = can.createAiTask(identity);
+  const registry = useResource(() => api.agents(), [api]);
+  const agentRows = useMemo(
+    () => (tk ? taskAgentRows(tk, ((registry.data?.items || []) as unknown as RegistryAgent[]) ?? []) : []),
+    [tk, registry.data],
+  );
 
   const act = async (fn: () => Promise<unknown>, msg: string) => {
     setErr(null);
@@ -328,7 +334,7 @@ function TaskDetail({ id }: { id: string }) {
           </dl>
 
           <h3 style={{ marginTop: 12 }}>{t("collab.activeAgents")}</h3>
-          {(tk.agents || []).length === 0 ? (
+          {agentRows.length === 0 ? (
             <p className="muted small">—</p>
           ) : (
             <TableWrap label={t("collab.activeAgents")}>
@@ -342,10 +348,11 @@ function TaskDetail({ id }: { id: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {(tk.agents || []).map((a, i) => (
+                  {agentRows.map((a, i) => (
                     <tr key={i}>
                       <td>
-                        <code>{a.agent_id || a.id || a.name}</code>
+                        <code>{a.agent_id}</code>
+                        {a.name ? <span className="small muted"> {a.name}</span> : null}
                       </td>
                       <td>{a.status ? <StatusBadge kind="task" value={a.status} /> : "—"}</td>
                       <td>

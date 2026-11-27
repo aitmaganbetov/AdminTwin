@@ -1,0 +1,307 @@
+{
+  "cases": 33,
+  "precision_at_1": 1.0,
+  "precision_at_3": 1.0,
+  "false_confident_rate": 0.0,
+  "unjustified_refusal_rate": 0.0,
+  "mean_tool_calls_to_correct": 6.545,
+  "results": [
+    {
+      "case_id": "http502-upstream-oom-002",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "upstream_container_oom",
+      "top_confidence": 0.9
+    },
+    {
+      "case_id": "http502-upstream-crash-003",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "upstream_container_stopped",
+      "top_confidence": 0.75
+    },
+    {
+      "case_id": "http502-db-connections-004",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "db_connections_exhausted",
+      "top_confidence": 0.85
+    },
+    {
+      "case_id": "http502-firewall-block-005",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "firewall_policy_block",
+      "top_confidence": 0.7
+    },
+    {
+      "case_id": "http502-db-locks-006",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "db_lock_contention",
+      "top_confidence": 0.8
+    },
+    {
+      "case_id": "http502-restart-loop-007",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "upstream_container_restart_loop",
+      "top_confidence": 0.7
+    },
+    {
+      "case_id": "http502-config-error-008",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "upstream_container_config_error",
+      "top_confidence": 0.95
+    },
+    {
+      "case_id": "http502-conflict-db-vs-loop-009",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "db_connections_exhausted",
+      "top_confidence": 0.95
+    },
+    {
+      "case_id": "http502-conflict-loop-vs-db-010",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "upstream_container_restart_loop",
+      "top_confidence": 0.7
+    },
+    {
+      "case_id": "http502-conflict-stop-vs-fw-011",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "upstream_container_stopped",
+      "top_confidence": 0.95
+    },
+    {
+      "case_id": "http502-phpfpm-failed-012",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "upstream_service_failed",
+      "top_confidence": 0.8
+    },
+    {
+      "case_id": "disk-logrotate-failure-002",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "log_rotation_failure",
+      "top_confidence": 0.85
+    },
+    {
+      "case_id": "disk-app-log-growth-003",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "application_log_growth",
+      "top_confidence": 0.75
+    },
+    {
+      "case_id": "disk-ambiguous-growth-004",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "application_log_growth",
+      "top_confidence": 0.85
+    },
+    {
+      "case_id": "disk-ambiguous-rotation-005",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "log_rotation_failure",
+      "top_confidence": 0.55
+    },
+    {
+      "case_id": "disk-database-bloat-006",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "database_bloat",
+      "top_confidence": 0.7
+    },
+    {
+      "case_id": "disk-wal-archiving-007",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "wal_archiving_failure",
+      "top_confidence": 0.9
+    },
+    {
+      "case_id": "disk-docker-images-008",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "docker_images_accumulation",
+      "top_confidence": 0.75
+    },
+    {
+      "case_id": "disk-core-dumps-009",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "core_dumps_accumulation",
+      "top_confidence": 0.8
+    },
+    {
+      "case_id": "disk-backup-leftovers-010",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "backup_files_left",
+      "top_confidence": 0.75
+    },
+    {
+      "case_id": "disk-inode-exhaustion-011",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "inode_exhaustion",
+      "top_confidence": 0.85
+    },
+    {
+      "case_id": "disk-logrotate-nginx-012",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "log_rotation_failure",
+      "top_confidence": 0.85
+    },
+    {
+      "case_id": "container-config-error-002",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "container_config_error",
+      "top_confidence": 0.85
+    },
+    {
+      "case_id": "container-oom-killed-003",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "container_oom_killed",
+      "top_confidence": 0.9
+    },
+    {
+      "case_id": "container-host-oom-004",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "host_out_of_memory",
+      "top_confidence": 0.8
+    },
+    {
+      "case_id": "container-manual-stop-005",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "manual_stop",
+      "top_confidence": 0.85
+    },
+    {
+      "case_id": "container-dependency-db-006",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "dependency_unavailable",
+      "top_confidence": 0.75
+    },
+    {
+      "case_id": "container-image-pull-007",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "image_pull_failure",
+      "top_confidence": 0.9
+    },
+    {
+      "case_id": "container-host-disk-full-008",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "host_disk_full",
+      "top_confidence": 0.85
+    },
+    {
+      "case_id": "container-segfault-009",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "container_crash",
+      "top_confidence": 0.65
+    },
+    {
+      "case_id": "container-oom-no-logs-010",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "container_oom_killed",
+      "top_confidence": 0.85
+    },
+    {
+      "case_id": "container-config-directive-011",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "container_config_error",
+      "top_confidence": 0.85
+    },
+    {
+      "case_id": "container-conflict-dep-vs-disk-012",
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "false_confident": false,
+      "refused": false,
+      "top_cause": "dependency_unavailable",
+      "top_confidence": 0.95
+    }
+  ]
+}

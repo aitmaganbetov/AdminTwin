@@ -235,6 +235,30 @@ class HypothesisTable:
         self._by_cause[h.cause] = merged
         return merged
 
+    def update(self, cause: str, *, confidence: float | None = None,
+               supporting: list[str] | None = None,
+               refuting: list[str] | None = None) -> Hypothesis | None:
+        """Пересчёт гипотезы после разделяющей проверки (новые причины не добавляются)."""
+        existing = self._by_cause.get(cause)
+        if existing is None:
+            return None
+        update: dict[str, Any] = {
+            "supporting": _union(existing.supporting, supporting or []),
+            "refuting": _union(existing.refuting, refuting or []),
+        }
+        if confidence is not None:
+            update["confidence"] = max(0.0, min(1.0, confidence))
+        merged = existing.model_copy(update=update)
+        self._by_cause[cause] = merged
+        return merged
+
+    def get(self, cause: str) -> Hypothesis | None:
+        return self._by_cause.get(cause)
+
+    @property
+    def facts(self) -> list[tuple[str, str]]:
+        return list(self._facts)
+
     def add_fact(self, evidence_id: str, statement: str) -> None:
         self._facts.append((evidence_id, statement))
 

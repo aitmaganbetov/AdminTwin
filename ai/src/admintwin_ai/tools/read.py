@@ -6,7 +6,7 @@ PostgreSQL/FortiGate read-only) подключаются реализацией 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from admintwin_ai.tools.invoker import ToolContext
 from admintwin_ai.tools.registry import ToolBackendError, ToolHandler, ToolOutput
@@ -29,6 +29,14 @@ class ReadBackend(Protocol):
     def asset_exists(self, tenant_id: str, asset_id: str) -> bool: ...
 
     def fetch(self, tool: str, tenant_id: str, params: dict[str, Any]) -> ToolOutput: ...
+
+
+@runtime_checkable
+class AgentAwareReadBackend(ReadBackend, Protocol):
+    """Backend, вызывающий источник от имени конкретного агента (HTTP к ядру)."""
+
+    def fetch_as(self, tool: str, tenant_id: str, agent_id: str,
+                 params: dict[str, Any]) -> ToolOutput: ...
 
 
 Fixture = dict[str, Any] | ToolOutput | Callable[[dict[str, Any]], dict[str, Any] | ToolOutput]
@@ -67,6 +75,8 @@ def read_handlers(backend: ReadBackend) -> dict[str, ToolHandler]:
     def make(tool: str) -> ToolHandler:
         def handler(ctx: ToolContext, params: dict[str, Any]) -> ToolOutput:
             # tenant берётся только из контекста вызова, никогда из параметров модели
+            if isinstance(backend, AgentAwareReadBackend):
+                return backend.fetch_as(tool, ctx.tenant_id, ctx.agent.id, params)
             return backend.fetch(tool, ctx.tenant_id, params)
         return handler
 

@@ -9,6 +9,9 @@ supporting_agents: [ai-commander]
 standards: [STD-01]
 operations:
   - {level: observe,  tool: postgres.activity}
+  - {level: observe,  tool: asset.get}
+  - {level: observe,  tool: events.list}
+  - {level: diagnose, tool: linux.disk.usage}
   - {level: diagnose, tool: metrics.query}
   - {level: diagnose, tool: logs.search}
 asset_types: [database]

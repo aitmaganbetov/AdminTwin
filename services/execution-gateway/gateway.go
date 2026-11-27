@@ -45,8 +45,10 @@ type Request struct {
 	InWindow      bool // текущий момент внутри maintenance window tenant
 	ApprovedBy    []string
 	CorrelationID string
-	// OnExecuteStart вызывается после успешного preflight, непосредственно перед движком.
-	OnExecuteStart func()
+	// OnExecuteStart вызывается после preflight непосредственно перед движком. Движок вызывается,
+	// только если владелец ChangeRequest подтвердил переход в executing (true): отмена, kill switch,
+	// изменившаяся политика или исчерпанный лимит дают false — исполнение не начинается.
+	OnExecuteStart func() bool
 }
 
 // StepResult — результат шага.
@@ -79,6 +81,7 @@ type Result struct {
 type EngineRequest struct {
 	TenantID string
 	AssetID  string
+	Asset    inventory.Asset
 	Action   string
 	Argv     []string
 	Params   map[string]any
@@ -104,15 +107,43 @@ type Engine interface {
 	Execute(ctx context.Context, req EngineRequest) (EngineResult, error)
 }
 
-// Lease — краткоживущий доступ (capability handle), секрет не покидает Gateway.
+// Lease — краткоживущий доступ (capability handle). Секрет живёт только внутри процесса Gateway
+// и передаётся движку; в журналы, evidence и агентам не попадает (String/MarshalJSON редактируют).
 type Lease struct {
-	Handle    string
-	ExpiresAt time.Time
+	Handle     string
+	ExpiresAt  time.Time
+	Credential Credential
+}
+
+// Credential — материал доступа, выданный Vault на время исполнения.
+type Credential struct {
+	Username   string
+	Password   string
+	PrivateKey []byte // PEM (SSH)
+	Token      string // API-токен (FortiGate и т.п.)
+	ClientCert []byte // PEM mTLS (Docker API)
+	ClientKey  []byte
+	CACert     []byte
+}
+
+// String не раскрывает секреты.
+func (c Credential) String() string { return "Credential{[REDACTED]}" }
+
+// GoString не раскрывает секреты (%#v).
+func (c Credential) GoString() string { return c.String() }
+
+// MarshalJSON не раскрывает секреты.
+func (c Credential) MarshalJSON() ([]byte, error) { return []byte(`"[REDACTED]"`), nil }
+
+// Empty — материал не выдан.
+func (c Credential) Empty() bool {
+	return c.Username == "" && c.Password == "" && len(c.PrivateKey) == 0 && c.Token == "" && len(c.ClientCert) == 0
 }
 
 // CredentialBroker — Vault / OpenBao. Недоступность = исполнения невозможны (§17.2).
+// credentialRef — путь в Vault из inventory.Asset.Connection.CredentialRef (может быть пустым для симулятора).
 type CredentialBroker interface {
-	Lease(ctx context.Context, tenantID, assetID string, ttl time.Duration) (Lease, error)
+	Lease(ctx context.Context, tenantID, assetID, credentialRef string, ttl time.Duration) (Lease, error)
 	Revoke(ctx context.Context, l Lease) error
 }
 
@@ -179,7 +210,11 @@ func (g *Gateway) Run(ctx context.Context, req Request) Result {
 		step("execute", "credentials", false, false, "credential broker unavailable: executions impossible")
 		return finish(StatusFailed)
 	}
-	lease, err := g.Broker.Lease(ctx, req.TenantID, req.Asset.ID, ttl)
+	credRef := ""
+	if req.Asset.Connection != nil {
+		credRef = req.Asset.Connection.CredentialRef
+	}
+	lease, err := g.Broker.Lease(ctx, req.TenantID, req.Asset.ID, credRef, ttl)
 	if err != nil {
 		step("execute", "credentials", false, false, "vault unavailable: "+err.Error())
 		return finish(StatusFailed)
@@ -212,13 +247,14 @@ func (g *Gateway) Run(ctx context.Context, req Request) Result {
 		step("execute", "cancellation", false, false, "cancelled before the engine was invoked")
 		return finish(StatusCancelled)
 	}
-	if req.OnExecuteStart != nil {
-		req.OnExecuteStart()
+	if req.OnExecuteStart != nil && !req.OnExecuteStart() {
+		step("execute", "authorization", false, false, "execution not confirmed by the change coordinator (cancelled, kill switch, policy or rate limit)")
+		return finish(StatusCancelled)
 	}
 	ectx, cancel := context.WithTimeout(ctx, time.Duration(req.Runbook.Execute.TimeoutS)*time.Second)
 	defer cancel()
 	out, err := eng.Execute(ectx, EngineRequest{
-		TenantID: req.TenantID, AssetID: req.Asset.ID, Action: req.Runbook.Execute.Action,
+		TenantID: req.TenantID, AssetID: req.Asset.ID, Asset: req.Asset, Action: req.Runbook.Execute.Action,
 		Argv: argv, Params: req.Params, DryRun: dry, Lease: lease,
 	})
 	res.Stdout, res.Stderr, res.ExitCode = Redact(out.Stdout), Redact(out.Stderr), out.ExitCode

@@ -154,7 +154,8 @@ class _Detector:
 _U = r"[A-Za-z0-9_][A-Za-z0-9_.$-]{0,63}"  # логин в журналах
 
 _SECRET_DETECTORS: tuple[_Detector, ...] = (
-    _Detector(re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----"),
+    _Detector(re.compile(
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----"),
               ((0, MaskKind.SECRET),)),
     _Detector(re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}"),
               ((0, MaskKind.SECRET),)),

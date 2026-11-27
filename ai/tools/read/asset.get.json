@@ -55,9 +55,8 @@
         "enum": [
           "production",
           "staging",
-          "test",
-          "development",
-          "dr"
+          "dev",
+          "test"
         ]
       },
       "criticality": {
@@ -78,10 +77,11 @@
       },
       "service_tier": {
         "type": [
-          "string",
+          "integer",
           "null"
         ],
-        "maxLength": 32
+        "minimum": 0,
+        "maximum": 3
       },
       "data_class": {
         "type": "string",

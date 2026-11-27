@@ -38,7 +38,7 @@
       "required": ["asset_ids", "environment", "data_sensitivity_max"],
       "properties": {
         "asset_ids": {"type": "array", "items": {"$ref": "#/$defs/uuid"}, "maxItems": 500, "uniqueItems": true},
-        "environment": {"type": "string", "enum": ["production", "staging", "test", "development", "dr"]},
+        "environment": {"type": "string", "enum": ["production", "staging", "dev", "test"]},
         "data_sensitivity_max": {"type": "string", "enum": ["public", "internal", "confidential", "pii", "secret"]}
       }
     },

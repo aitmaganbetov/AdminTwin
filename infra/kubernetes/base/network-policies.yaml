@@ -1,0 +1,75 @@
+# Сегментация (§18.2): всё запрещено, разрешены только нужные потоки.
+# Egress к внешним LLM нельзя ограничить DNS-именами средствами NetworkPolicy: используйте egress-gateway
+# или CNI с FQDN-политиками (Cilium) и allowlist зарегистрированных endpoint'ов (§6.5).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: core
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: admintwin-core } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: admintwin-web } }
+        - podSelector: { matchLabels: { app.kubernetes.io/name: admintwin-orchestrator } }
+        - namespaceSelector: { matchLabels: { admintwin.io/ingress: "true" } }
+      ports: [{ port: 8080 }]
+    - from:
+        - namespaceSelector: { matchLabels: { admintwin.io/monitoring: "true" } }
+      ports: [{ port: 9464 }]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: admintwin-orchestrator } } }]
+      ports: [{ port: 8090 }]
+    # PostgreSQL, Vault, наблюдаемая инфраструктура — адреса площадки задаются в overlay (ipBlock).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: orchestrator
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: admintwin-orchestrator } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app.kubernetes.io/name: admintwin-core } } }]
+      ports: [{ port: 8090 }]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: admintwin-core } } }]
+      ports: [{ port: 8080 }]
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: admintwin-nats } } }]
+      ports: [{ port: 4222 }]
+    # LLM: локальный endpoint (vLLM/Ollama) и внешние провайдеры — через egress-gateway в overlay.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: admintwin-web } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ namespaceSelector: { matchLabels: { admintwin.io/ingress: "true" } } }]
+      ports: [{ port: 3000 }]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: admintwin-core } } }]
+      ports: [{ port: 8080 }]

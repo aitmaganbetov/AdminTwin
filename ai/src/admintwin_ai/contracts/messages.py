@@ -20,7 +20,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from admintwin_ai.errors import ContractValidationError
 from admintwin_ai.resources import load_json
 
-SCHEMA_VERSION = "1.3"
+SCHEMA_VERSION: Literal["1.3"] = "1.3"
 
 
 class MessageType(StrEnum):
@@ -43,7 +43,7 @@ class MessageType(StrEnum):
 
 
 Priority = Literal["low", "normal", "high", "critical"]
-Environment = Literal["production", "staging", "test", "development", "dr"]
+Environment = Literal["production", "staging", "dev", "test"]  # ТЗ §8.3
 Sensitivity = Literal["public", "internal", "confidential", "pii", "secret"]
 
 _AGENT_ID = r"^[a-z][a-z0-9-]{1,62}$"
@@ -120,6 +120,17 @@ class MessageDeduplicator:
     def __init__(self, capacity: int = 10_000) -> None:
         self._seen: OrderedDict[uuid.UUID, None] = OrderedDict()
         self._capacity = capacity
+
+    def seen(self, message: AgentMessage) -> bool:
+        """Сообщение уже успешно обработано (без отметки)."""
+        return message.message_id in self._seen
+
+    def mark(self, message: AgentMessage) -> None:
+        """Отметить обработанным (после успешной обработки — at-least-once)."""
+        self._seen[message.message_id] = None
+        self._seen.move_to_end(message.message_id)
+        if len(self._seen) > self._capacity:
+            self._seen.popitem(last=False)
 
     def first_delivery(self, message: AgentMessage) -> bool:
         if message.message_id in self._seen:

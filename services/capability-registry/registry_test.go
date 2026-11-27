@@ -3,8 +3,11 @@ package registry
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 const root = "../.."
@@ -106,5 +109,62 @@ func TestRegistryRules(t *testing.T) {
 				t.Fatalf("want %q, got %v", tc.want, err)
 			}
 		})
+	}
+}
+
+// B.8: каждый tool, на который ссылается capability тира MVP, обязан иметь JSON Schema в ai/tools/{read|propose}/.
+func TestMVPToolsHaveSchemas(t *testing.T) {
+	r, err := Load(filepath.Join(root, "standards/registry.yaml"), filepath.Join(root, "capabilities"), noArtifacts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range r.SortedCapabilities() {
+		if c.Tier != "MVP" {
+			continue
+		}
+		for _, o := range c.Operations {
+			if o.Tool == "" {
+				continue
+			}
+			found := false
+			for _, kind := range []string{"read", "propose"} {
+				if _, err := os.Stat(filepath.Join(root, "ai", "tools", kind, o.Tool+".json")); err == nil {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s: tool %s has no JSON Schema in ai/tools", c.ID, o.Tool)
+			}
+		}
+	}
+}
+
+// T-CAP-001 (согласованность): каждый инструмент из allowed_tools агентов AI-слоя покрыт capability,
+// иначе Tool Service ядра отказал бы агенту (403), а агент считал бы инструмент доступным.
+func TestAgentAllowedToolsCoveredByCapabilities(t *testing.T) {
+	r, err := Load(filepath.Join(root, "standards/registry.yaml"), filepath.Join(root, "capabilities"), noArtifacts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "ai/agents/mvp-agents.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Agents []struct {
+			ID           string   `yaml:"id"`
+			AllowedTools []string `yaml:"allowed_tools"`
+		} `yaml:"agents"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Agents) == 0 {
+		t.Fatalf("agents: %v", err)
+	}
+	for _, a := range doc.Agents {
+		scope := r.ToolScope(a.ID)
+		for _, tool := range a.AllowedTools {
+			if !slices.Contains(scope, tool) {
+				t.Errorf("agent %s: tool %s is not granted by any capability", a.ID, tool)
+			}
+		}
 	}
 }

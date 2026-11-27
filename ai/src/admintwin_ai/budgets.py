@@ -9,6 +9,7 @@ downgrade профиля; жёсткий (100%) — ``budget.exhausted``, зад
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -107,6 +108,8 @@ class BudgetLedger:
         self.hard_threshold = hard_threshold
         self._clock = clock
         self._counters: dict[str, _Counters] = {}
+        # LLM-вызовы и вызовы инструментов выполняются в рабочих потоках оркестратора
+        self._lock = threading.RLock()
 
     def _get(self, scope: BudgetScope) -> _Counters:
         now = self._clock()
@@ -125,6 +128,11 @@ class BudgetLedger:
 
     def consume(self, scopes: Iterable[BudgetScope], *, tokens: int = 0, tool_calls: int = 0,
                 cost_usd: float = 0.0) -> None:
+        with self._lock:
+            self._consume(scopes, tokens=tokens, tool_calls=tool_calls, cost_usd=cost_usd)
+
+    def _consume(self, scopes: Iterable[BudgetScope], *, tokens: int, tool_calls: int,
+                 cost_usd: float) -> None:
         for scope in scopes:
             c = self._get(scope)
             c.tokens += tokens
@@ -132,6 +140,10 @@ class BudgetLedger:
             c.cost_usd += cost_usd
 
     def check(self, scopes: Iterable[BudgetScope], *, subtask_depth: int = 0) -> BudgetCheck:
+        with self._lock:
+            return self._check(scopes, subtask_depth=subtask_depth)
+
+    def _check(self, scopes: Iterable[BudgetScope], *, subtask_depth: int) -> BudgetCheck:
         state = BudgetState.OK
         utilization: dict[str, float] = {}
         events: list[BudgetEvent] = []

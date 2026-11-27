@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,16 +29,15 @@ from admintwin_ai.masking import Masker, MaskingSession
 from admintwin_ai.profiles import CapabilityRequirements, ProfileRegistry
 from admintwin_ai.providers.base import (
     Capability,
-    ChatMessage,
     CompletionRequest,
     CompletionResult,
     EmbeddingResult,
     ToolCall,
 )
 from admintwin_ai.routing.router import (
+    Router,
     RouteStatus,
     RouteTarget,
-    Router,
     RoutingDecision,
     RoutingRequest,
     TenantAIPolicy,
@@ -205,8 +205,10 @@ class AIGateway:
         messages = [
             msg.model_copy(update={
                 "content": m.mask(msg.content, session).text,
-                "tool_calls": [tc.model_copy(update={"arguments": m.mask_obj(tc.arguments, session)})
-                               for tc in msg.tool_calls],
+                "tool_calls": [
+                    tc.model_copy(update={"arguments": m.mask_obj(tc.arguments, session)})
+                    for tc in msg.tool_calls
+                ],
             })
             for msg in req.messages
         ]
@@ -218,6 +220,7 @@ class AIGateway:
                     decision: RoutingDecision, attempt: int, latency_ms: float, *,
                     result: CompletionResult | None = None, cost: float = 0.0,
                     error: Exception | None = None) -> None:
+        status: Literal["ok", "error", "refused"]
         if error is not None:
             status = "error"
         elif result is not None and result.finish_reason == "refusal":
@@ -250,7 +253,6 @@ def _unmask_result(result: CompletionResult, session: MaskingSession) -> Complet
 __all__ = [
     "AIGateway",
     "CallContext",
-    "ChatMessage",
     "GatewayResponse",
     "GatewayStatus",
 ]

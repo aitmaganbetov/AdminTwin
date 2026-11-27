@@ -1,0 +1,18 @@
+# Пример overlay площадки. Секреты admintwin-secrets / admintwin-llm создаются External Secrets из Vault.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - { name: admintwin-core, newName: registry.example.internal/admintwin/admintwin-core, newTag: "0.1.0" }
+  - { name: admintwin-orchestrator, newName: registry.example.internal/admintwin/admintwin-orchestrator, newTag: "0.1.0" }
+  - { name: admintwin-web, newName: registry.example.internal/admintwin/admintwin-web, newTag: "0.1.0" }
+patches:
+  - target: { kind: ConfigMap, name: admintwin-core }
+    patch: |-
+      - op: add
+        path: /data/ADMINTWIN_OIDC_ISSUER
+        value: https://sso.example.internal/realms/admintwin
+      - op: add
+        path: /data/ADMINTWIN_OIDC_AUDIENCE
+        value: admintwin

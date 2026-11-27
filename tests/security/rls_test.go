@@ -146,3 +146,36 @@ func TestRLSIsolationAndInvariants(t *testing.T) {
 		mustFail("owner deletes held evidence", "legal hold", "DELETE FROM evidence WHERE id = $1", eA)
 	})
 }
+
+// T-COMP-001 на уровне БД: CHECK не даёт сохранить verified/implemented без evidence.
+func TestControlAssessmentConstraint(t *testing.T) {
+	c, ctx := connect(t)
+	for _, f := range []string{"0004_compliance", "0003_observability", "0002_core_store", "0001_init"} {
+		down, _ := os.ReadFile("../../db/migrations/" + f + ".down.sql")
+		_, _ = c.Exec(ctx, string(down))
+		_, _ = c.Exec(ctx, "ROLLBACK") // down по несуществующей схеме оставляет прерванную транзакцию
+	}
+	for _, f := range []string{"0001_init", "0002_core_store", "0003_observability", "0004_compliance"} {
+		up, err := os.ReadFile("../../db/migrations/" + f + ".up.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+		exec(t, ctx, c, string(up))
+	}
+	t.Cleanup(func() {
+		_, _ = c.Exec(ctx, "RESET ROLE")
+		for _, f := range []string{"0004_compliance", "0003_observability", "0002_core_store", "0001_init"} {
+			down, _ := os.ReadFile("../../db/migrations/" + f + ".down.sql")
+			_, _ = c.Exec(ctx, string(down))
+			_, _ = c.Exec(ctx, "ROLLBACK")
+		}
+	})
+	exec(t, ctx, c, "SELECT set_config('admintwin.tenant_id', $1, false)", tA)
+	exec(t, ctx, c, "INSERT INTO tenants (id, name, edition) VALUES ($1::uuid, $1::text, 'enterprise')", tA)
+	exec(t, ctx, c, "SET ROLE admintwin_app")
+	_, err := c.Exec(ctx, `INSERT INTO control_assessments (tenant_id, control_id, status, evidence_ids, assessed_by, assessed_at) VALUES ($1, 'STD-10', 'verified', '{}', 'x', now())`, tA)
+	if err == nil || !strings.Contains(err.Error(), "check") {
+		t.Fatalf("verified without evidence must violate the DB constraint, got %v", err)
+	}
+	exec(t, ctx, c, `INSERT INTO control_assessments (tenant_id, control_id, status, evidence_ids, assessed_by, assessed_at) VALUES ($1, 'STD-10', 'verified', '{ev-1}', 'x', now())`, tA)
+}

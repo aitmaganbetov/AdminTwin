@@ -41,8 +41,14 @@ _INJECTION_PATTERNS = [
     r"\b(execute|run) (the following|this) (command|script)\b",
     r"\brm\s+-rf\b", r"\bcurl\b[^|\n]{0,200}\|\s*(ba)?sh\b", r"\bwget\b[^|\n]{0,200}\|\s*(ba)?sh\b",
     r"\bapprove\b.{0,30}\b(change|request|this)\b", r"</?\s*(system|assistant|tool_call)\s*>",
-    r"(^|\n)\s*(system|assistant)\s*:", r"\bbase64\s+-d\b", r"\bdocker(\.|\s)container(\.|\s)restart\b",
+    r"(^|\n)\s*(system|assistant)\s*:", r"\bbase64\s+-d\b",
+    r"\bdocker(\.|\s)container(\.|\s)restart\b",
     r"\bchange\.propose\b", r"\btenant_id\b",
+    # вызов инструмента по имени, попытки закрыть обёртку, подмена ролей
+    r"(?<![a-z])(call|invoke|use|run)[._\s]+(the\s+)?(tool\s+)?[a-z_]+\.[a-z_]+",
+    r"ADMINTWIN_TOOL_OUTPUT", r"(?<![a-z])(assistant|system)\s*:", r"system[_ -]?prompt",
+    r"you[_ -]are[_ -]now", r"developer[_ -]mode", r"\b(ai|ии)[- ]?(agents?|assistants?|агент)\b",
+    r"\bmust run\b", r"\"tool\"\s*:", r"\bpre-approved\b",
     # ru
     r"игнорир\w*.{0,40}(инструкц|указан|правил)", r"забудь\w*.{0,40}(инструкц|указан|правил)",
     r"(предыдущ|прошл)\w*\s+(инструкц|указан)", r"ты\s+теперь", r"системн\w+\s+промпт",

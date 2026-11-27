@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,8 +18,13 @@ class RateLimiter:
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
         self._buckets: dict[tuple[str, ...], _Bucket] = {}
+        self._lock = threading.Lock()  # вызовы инструментов идут из рабочих потоков
 
     def allow(self, key: tuple[str, ...], per_minute: int) -> bool:
+        with self._lock:
+            return self._allow(key, per_minute)
+
+    def _allow(self, key: tuple[str, ...], per_minute: int) -> bool:
         now = self._clock()
         capacity = float(per_minute)
         bucket = self._buckets.get(key)

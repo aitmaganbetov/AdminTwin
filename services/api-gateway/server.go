@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -10,11 +11,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/aitmaganbetov/admintwin/pkg/httpapi"
 	"github.com/aitmaganbetov/admintwin/pkg/identity"
 	"github.com/aitmaganbetov/admintwin/pkg/killswitch"
+	"github.com/aitmaganbetov/admintwin/pkg/metrics"
 	"github.com/aitmaganbetov/admintwin/pkg/problem"
 	"github.com/aitmaganbetov/admintwin/services/approval"
 	"github.com/aitmaganbetov/admintwin/services/audit"
@@ -33,25 +37,35 @@ type Authenticator func(r *http.Request) (identity.Actor, error)
 type Server struct {
 	Auth      Authenticator
 	Changes   *change.Coordinator
-	Inventory *inventory.Store
+	Inventory inventory.Repository
 	Catalog   *runbook.Catalog
 	Registry  *registry.Registry
 	Audit     *audit.Log
-	Evidence  *evidence.Store
+	Evidence  evidence.Repository
 	Kill      *killswitch.Switch
 	Tenants   func(string) (policy.TenantPolicy, bool)
 	Log       *slog.Logger
 	StartedAt time.Time
 	Version   string
 	Simulator bool
+	// Modules — сервисы, публикующие собственные маршруты (incidents, telemetry, discovery, connectors, ...).
+	Modules []httpapi.Module
+	// Metrics — meta-monitoring (M24); nil — без метрик.
+	Metrics *metrics.Registry
+	// Checks — проверки компонентов для /health/platform.
+	Checks []HealthCheck
+	// SaveTenant — сохранение политики tenant.
+	SaveTenant func(policy.TenantPolicy) error
+
+	patterns []string
 }
 
-// Handler строит маршруты.
+// Handler строит маршруты ядра и подключённых модулей.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health/platform", s.health)
 
-	auth := func(h func(http.ResponseWriter, *http.Request, identity.Actor)) http.HandlerFunc {
+	wrap := func(h httpapi.Handler) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			a, err := s.Auth(r)
 			if err != nil {
@@ -62,36 +76,53 @@ func (s *Server) Handler() http.Handler {
 				s.fail(w, r, problem.New(problem.Unauthenticated, "unknown tenant"))
 				return
 			}
+			if a.Kind == identity.KindUser && len(a.Roles) == 0 {
+				// Аутентифицирован, но без ролей AdminTwin (например, токен SSO без admintwin_roles): доступа нет.
+				s.fail(w, r, problem.New(problem.Forbidden, "no AdminTwin role assigned"))
+				return
+			}
 			h(w, r.WithContext(identity.WithActor(r.Context(), a)), a)
 		}
 	}
+	rt := &httpapi.Router{Mux: mux, Wrap: wrap}
 
-	mux.HandleFunc("GET /api/v1/assets", auth(s.listAssets))
-	mux.HandleFunc("GET /api/v1/assets/{id}", auth(s.getAsset))
-	mux.HandleFunc("GET /api/v1/assets/{id}/blast-radius", auth(s.blastRadius))
-	mux.HandleFunc("GET /api/v1/topology", auth(s.topology))
-	mux.HandleFunc("GET /api/v1/runbooks", auth(s.listRunbooks))
-	mux.HandleFunc("GET /api/v1/capabilities", auth(s.listCapabilities))
-	mux.HandleFunc("GET /api/v1/capabilities/{id}/tests", auth(s.capabilityTests))
-	mux.HandleFunc("GET /api/v1/capabilities/traceability", auth(s.traceability))
-	mux.HandleFunc("GET /api/v1/standards", auth(s.listStandards))
+	rt.Handle("GET /api/v1/assets", s.listAssets)
+	rt.Handle("GET /api/v1/assets/{id}", s.getAsset)
+	rt.Handle("GET /api/v1/assets/{id}/blast-radius", s.blastRadius)
+	rt.Handle("GET /api/v1/topology", s.topology)
+	rt.Handle("GET /api/v1/runbooks", s.listRunbooks)
+	rt.Handle("GET /api/v1/capabilities", s.listCapabilities)
+	rt.Handle("GET /api/v1/capabilities/{id}/tests", s.capabilityTests)
+	rt.Handle("GET /api/v1/capabilities/traceability", s.traceability)
+	rt.Handle("GET /api/v1/standards", s.listStandards)
 
-	mux.HandleFunc("POST /api/v1/changes", auth(s.createChange))
-	mux.HandleFunc("GET /api/v1/changes", auth(s.listChanges))
-	mux.HandleFunc("GET /api/v1/changes/{id}", auth(s.getChange))
-	mux.HandleFunc("POST /api/v1/changes/{id}/decisions", auth(s.decide))
-	mux.HandleFunc("POST /api/v1/changes/{id}/cancel", auth(s.cancelChange))
-	mux.HandleFunc("GET /api/v1/changes/{id}/executions", auth(s.changeExecutions))
-	mux.HandleFunc("GET /api/v1/executions/{id}", auth(s.getExecution))
+	rt.Handle("POST /api/v1/changes", s.createChange)
+	rt.Handle("GET /api/v1/changes", s.listChanges)
+	rt.Handle("GET /api/v1/changes/{id}", s.getChange)
+	rt.Handle("POST /api/v1/changes/{id}/decisions", s.decide)
+	rt.Handle("POST /api/v1/changes/{id}/cancel", s.cancelChange)
+	rt.Handle("GET /api/v1/changes/{id}/executions", s.changeExecutions)
+	rt.Handle("GET /api/v1/executions/{id}", s.getExecution)
 
-	mux.HandleFunc("GET /api/v1/kill-switch", auth(s.killStatus))
-	mux.HandleFunc("POST /api/v1/kill-switch", auth(s.killSet))
-	mux.HandleFunc("GET /api/v1/audit-logs", auth(s.auditLogs))
-	mux.HandleFunc("GET /api/v1/audit-logs/integrity", auth(s.auditIntegrity))
-	mux.HandleFunc("GET /api/v1/evidence/{id}", auth(s.getEvidence))
+	rt.Handle("GET /api/v1/kill-switch", s.killStatus)
+	rt.Handle("POST /api/v1/kill-switch", s.killSet)
+	rt.Handle("GET /api/v1/audit-logs", s.auditLogs)
+	rt.Handle("GET /api/v1/audit-logs/integrity", s.auditIntegrity)
+	rt.Handle("GET /api/v1/evidence/{id}", s.getEvidence)
+	rt.Handle("GET /api/v1/tenant/policy", s.getTenantPolicy)
+	rt.Handle("PUT /api/v1/tenant/policy", s.putTenantPolicy)
+	rt.Handle("POST /api/v1/changes/{id}/pir", s.recordPIR)
+	rt.Handle("POST /api/v1/audit/ai-calls", s.recordAICalls)
 
+	for _, m := range s.Modules {
+		m.Routes(rt)
+	}
+	s.patterns = append([]string{"GET /api/v1/health/platform"}, rt.Patterns...)
 	return s.middleware(mux)
 }
+
+// RoutePatterns — маршруты, опубликованные последним вызовом Handler().
+func (s *Server) RoutePatterns() []string { return append([]string(nil), s.patterns...) }
 
 type ctxReqID struct{}
 
@@ -109,6 +140,15 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(sw, r)
+		if s.Metrics != nil {
+			route := r.Pattern
+			if route == "" {
+				route = "unmatched"
+			}
+			lbl := map[string]string{"route": route, "status": strconv.Itoa(sw.status)}
+			s.Metrics.Inc("admintwin_http_requests_total", lbl, 1)
+			s.Metrics.Observe("admintwin_http_request_duration_seconds", map[string]string{"route": route}, time.Since(start).Seconds())
+		}
 		if s.Log != nil {
 			s.Log.Info("http", "method", r.Method, "path", r.URL.Path, "status", sw.status, "request_id", rid, "duration_ms", time.Since(start).Milliseconds())
 		}
@@ -121,6 +161,16 @@ type statusWriter struct {
 }
 
 func (w *statusWriter) WriteHeader(code int) { w.status = code; w.ResponseWriter.WriteHeader(code) }
+
+// Flush — для потоковых ответов (SSE).
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap — для http.ResponseController.
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	if _, ok := problem.As(err); !ok && s.Log != nil {
@@ -164,13 +214,37 @@ func requireAny(a identity.Actor, roles ...identity.Role) error {
 
 // --- handlers ---
 
-func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, 200, map[string]any{
-		"status": "ok", "version": s.Version, "uptime_s": int(time.Since(s.StartedAt).Seconds()),
-		"components": map[string]string{
-			"runbook_catalog": "ok", "capability_registry": "ok", "policy_engine": "builtin",
-			"execution_backend": map[bool]string{true: "simulator", false: "connectors"}[s.Simulator],
-		},
+// HealthCheck — проверка компонента. Critical — отказ делает платформу недоступной (503).
+type HealthCheck struct {
+	Name     string
+	Critical bool
+	Check    func(ctx context.Context) error
+}
+
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	comps := map[string]string{
+		"runbook_catalog": "ok", "capability_registry": "ok", "policy_engine": "builtin",
+		"execution_backend": map[bool]string{true: "simulator", false: "connectors"}[s.Simulator],
+	}
+	status, code := "ok", 200
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	for _, c := range s.Checks {
+		if err := c.Check(ctx); err != nil {
+			comps[c.Name] = "down"
+			if c.Critical {
+				status, code = "down", http.StatusServiceUnavailable
+			} else if status == "ok" {
+				status = "degraded"
+			}
+			continue
+		}
+		comps[c.Name] = "ok"
+	}
+	_, plat := s.Kill.Status("")
+	writeJSON(w, code, map[string]any{
+		"status": status, "version": s.Version, "uptime_s": int(time.Since(s.StartedAt).Seconds()),
+		"components": comps, "platform_kill_switch": plat.Active,
 	})
 }
 
@@ -263,12 +337,18 @@ func (s *Server) createChange(w http.ResponseWriter, r *http.Request, a identity
 		s.fail(w, r, problem.New(problem.SeparationOfDuties, "AI agent cannot initiate break-glass emergency change"))
 		return
 	}
+	if in.Type == policy.ChangeEmergency {
+		if err := requireMFA(a); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
 	cr, err := s.Changes.Propose(a, in)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, statusForChange(cr), changeView(cr))
+	writeJSON(w, statusForChange(cr), changeView(cr, a))
 }
 
 // statusForChange: 202 + waiting_approval — принято и ждёт согласования (§13).
@@ -280,14 +360,46 @@ func statusForChange(cr *change.ChangeRequest) int {
 	return http.StatusCreated
 }
 
-func changeView(cr *change.ChangeRequest) map[string]any {
+// canSeeExecutionOutput — вывод исполнения (stdout/stderr/шаги) равнозначен содержимому evidence:
+// по матрице §2.2 его видят TA, ITM, Engineer, Compliance Manager и Auditor; агенты получают ссылки.
+func canSeeExecutionOutput(a identity.Actor) bool {
+	return a.Kind == identity.KindUser && !a.IsAI() &&
+		a.HasAny(identity.RoleTenantAdmin, identity.RoleITManager, identity.RoleEngineer, identity.RoleComplianceManager, identity.RoleAuditor)
+}
+
+func changeView(cr *change.ChangeRequest, a identity.Actor) map[string]any {
 	b, _ := json.Marshal(cr)
 	var m map[string]any
 	_ = json.Unmarshal(b, &m)
+	if !canSeeExecutionOutput(a) {
+		if exs, ok := m["executions"].([]any); ok {
+			for _, e := range exs {
+				if em, ok := e.(map[string]any); ok {
+					redactResult(em)
+				}
+			}
+		}
+	}
 	if cr.Status == change.WaitingApproval {
 		m["status"] = "waiting_approval"
 	}
 	return m
+}
+
+// redactResult оставляет в результате исполнения только статус и ссылки на evidence.
+func redactResult(em map[string]any) {
+	res, ok := em["result"].(map[string]any)
+	if !ok {
+		return
+	}
+	keep := map[string]any{}
+	for _, k := range []string{"execution_id", "status", "evidence_id", "digest", "started_at", "finished_at", "exit_code"} {
+		if v, ok := res[k]; ok {
+			keep[k] = v
+		}
+	}
+	keep["output_redacted"] = true
+	em["result"] = keep
 }
 
 func (s *Server) listChanges(w http.ResponseWriter, r *http.Request, a identity.Actor) {
@@ -295,7 +407,7 @@ func (s *Server) listChanges(w http.ResponseWriter, r *http.Request, a identity.
 	items := []map[string]any{}
 	for _, cr := range s.Changes.List(a.TenantID) {
 		if status == "" || string(cr.Status) == status {
-			items = append(items, changeView(cr))
+			items = append(items, changeView(cr, a))
 		}
 	}
 	writeJSON(w, 200, map[string]any{"items": items})
@@ -307,7 +419,7 @@ func (s *Server) getChange(w http.ResponseWriter, r *http.Request, a identity.Ac
 		s.fail(w, r, problem.New(problem.NotFound, "change not found"))
 		return
 	}
-	writeJSON(w, 200, changeView(cr))
+	writeJSON(w, 200, changeView(cr, a))
 }
 
 type decisionBody struct {
@@ -316,6 +428,10 @@ type decisionBody struct {
 }
 
 func (s *Server) decide(w http.ResponseWriter, r *http.Request, a identity.Actor) {
+	if err := requireMFA(a); err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	var b decisionBody
 	if err := decode(r, &b); err != nil {
 		s.fail(w, r, err)
@@ -326,7 +442,7 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request, a identity.Actor
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 200, changeView(cr))
+	writeJSON(w, 200, changeView(cr, a))
 }
 
 type cancelBody struct {
@@ -355,7 +471,7 @@ func (s *Server) cancelChange(w http.ResponseWriter, r *http.Request, a identity
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 202, changeView(cr))
+	writeJSON(w, 202, changeView(cr, a))
 }
 
 func (s *Server) changeExecutions(w http.ResponseWriter, r *http.Request, a identity.Actor) {
@@ -364,7 +480,7 @@ func (s *Server) changeExecutions(w http.ResponseWriter, r *http.Request, a iden
 		s.fail(w, r, problem.New(problem.NotFound, "change not found"))
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": cr.Executions})
+	writeJSON(w, 200, map[string]any{"items": changeView(cr, a)["executions"]})
 }
 
 func (s *Server) getExecution(w http.ResponseWriter, r *http.Request, a identity.Actor) {
@@ -373,7 +489,13 @@ func (s *Server) getExecution(w http.ResponseWriter, r *http.Request, a identity
 		s.fail(w, r, problem.New(problem.NotFound, "execution not found"))
 		return
 	}
-	writeJSON(w, 200, ex)
+	b, _ := json.Marshal(ex)
+	var em map[string]any
+	_ = json.Unmarshal(b, &em)
+	if !canSeeExecutionOutput(a) {
+		redactResult(em)
+	}
+	writeJSON(w, 200, em)
 }
 
 type killBody struct {
@@ -388,6 +510,10 @@ func (s *Server) killStatus(w http.ResponseWriter, _ *http.Request, a identity.A
 }
 
 func (s *Server) killSet(w http.ResponseWriter, r *http.Request, a identity.Actor) {
+	if err := requireMFA(a); err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	var b killBody
 	if err := decode(r, &b); err != nil {
 		s.fail(w, r, err)

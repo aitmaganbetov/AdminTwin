@@ -1,0 +1,36 @@
+# AdminTwin Web UI (apps/web). Сборка из корня репозитория:
+#   docker build -f infra/docker/Dockerfile.web --build-arg ADMINTWIN_CORE_URL=http://admintwin-core:8080 -t admintwin-web .
+# Rewrites /api/v1/* → ADMINTWIN_CORE_URL фиксируются при сборке (routes-manifest), как и NEXT_PUBLIC_*.
+FROM node:22.12-alpine AS deps
+WORKDIR /app
+COPY apps/web/package.json apps/web/package-lock.json apps/web/.npmrc ./
+RUN npm ci
+
+FROM node:22.12-alpine AS build
+WORKDIR /app
+ARG ADMINTWIN_CORE_URL=http://admintwin-core:8080
+ARG NEXT_PUBLIC_OIDC_ISSUER=
+ARG NEXT_PUBLIC_OIDC_CLIENT_ID=admintwin-web
+ARG NEXT_PUBLIC_OIDC_SCOPE="openid profile email"
+ARG NEXT_PUBLIC_OIDC_AUDIENCE=
+ENV ADMINTWIN_CORE_URL=$ADMINTWIN_CORE_URL \
+    NEXT_PUBLIC_OIDC_ISSUER=$NEXT_PUBLIC_OIDC_ISSUER \
+    NEXT_PUBLIC_OIDC_CLIENT_ID=$NEXT_PUBLIC_OIDC_CLIENT_ID \
+    NEXT_PUBLIC_OIDC_SCOPE=$NEXT_PUBLIC_OIDC_SCOPE \
+    NEXT_PUBLIC_OIDC_AUDIENCE=$NEXT_PUBLIC_OIDC_AUDIENCE \
+    ADMINTWIN_WEB_STANDALONE=1 \
+    NEXT_TELEMETRY_DISABLED=1
+COPY --from=deps /app/node_modules ./node_modules
+COPY apps/web/ ./
+RUN npm run build
+
+FROM node:22.12-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
+RUN addgroup -S admintwin && adduser -S -G admintwin admintwin
+COPY --from=build --chown=admintwin:admintwin /app/.next/standalone ./
+COPY --from=build --chown=admintwin:admintwin /app/.next/static ./.next/static
+COPY --from=build --chown=admintwin:admintwin /app/public ./public
+USER admintwin
+EXPOSE 3000
+CMD ["node", "server.js"]

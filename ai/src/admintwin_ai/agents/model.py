@@ -45,7 +45,8 @@ AGENT_OPERATION_LEVELS = frozenset({
 
 #: Имена инструментов, которые агенту не могут быть выданы ни при каких настройках.
 _FORBIDDEN_TOOL = re.compile(
-    r"(?i)(^|[._])(shell|exec|execute|ssh|run|command|approve|approval|decision|decisions"
+    r"(?i)(^|[._])(shell|exec|execute|execution|executions|ssh|run|command"
+    r"|approve|approval|decision|decisions"
     r"|secret|secrets|vault|credential|credentials|break_glass|breakglass|kill_switch)([._]|$)"
 )
 
@@ -80,7 +81,8 @@ class AgentDefinition(BaseModel):
     allowed_capabilities: frozenset[str] = frozenset()
     capability_levels: frozenset[OperationLevel] = AGENT_OPERATION_LEVELS
     allowed_tools: frozenset[str]
-    allowed_runbooks: frozenset[str] = frozenset()  # что агент может предложить через change.propose
+    # runbooks, которые агент может предложить через change.propose
+    allowed_runbooks: frozenset[str] = frozenset()
     model_profile: str
     fallback_model_profile: str | None = None
     required_model_capabilities: frozenset[Capability] = frozenset({Capability.TOOL_CALLING})

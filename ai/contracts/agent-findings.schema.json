@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.admintwin.io/ai/contracts/agent-findings/1.0.json",
+  "title": "AdminTwin agent findings",
+  "description": "Структурированный итог агента (ТЗ §5.3, §9): факты со ссылками на evidence, гипотезы с confidence, подтверждающие/опровергающие evidence IDs, безопасные проверки, исключённые причины. Передаётся между агентами вместо свободного текста.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["hypotheses"],
+  "properties": {
+    "summary": {"type": "string", "maxLength": 4000},
+    "facts": {
+      "type": "array", "maxItems": 100,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["evidence_id", "statement"],
+        "properties": {
+          "evidence_id": {"$ref": "#/$defs/evidence_id"},
+          "statement": {"type": "string", "minLength": 1, "maxLength": 1000}
+        }
+      }
+    },
+    "hypotheses": {
+      "type": "array", "maxItems": 20,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["cause", "confidence"],
+        "properties": {
+          "cause": {"type": "string", "pattern": "^[a-z][a-z0-9_]{2,63}$"},
+          "statement": {"type": "string", "maxLength": 1000},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "supporting": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/evidence_id"}},
+          "refuting": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/evidence_id"}},
+          "checks": {
+            "type": "array", "maxItems": 5,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["tool", "description"],
+              "properties": {
+                "tool": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,3}$"},
+                "description": {"type": "string", "minLength": 1, "maxLength": 500},
+                "params": {"type": "object"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "excluded_causes": {"type": "array", "maxItems": 50, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]{2,63}$"}},
+    "suggested_agents": {"type": "array", "maxItems": 5, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"}},
+    "conclusion": {"type": "string", "maxLength": 4000}
+  },
+  "$defs": {
+    "evidence_id": {"type": "string", "pattern": "^ev-[a-z0-9-]{1,80}$"}
+  }
+}

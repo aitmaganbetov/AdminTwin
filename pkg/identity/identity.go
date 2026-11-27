@@ -45,6 +45,10 @@ type Actor struct {
 	Roles    []Role
 	// Scopes — атрибуты области Engineer (sysadmin/network/devops/security/dba/sre) и forensic.
 	Scopes []string
+	// MFA — аутентификация пользователя подтверждена вторым фактором (amr/acr IdP).
+	MFA bool
+	// Via — способ аутентификации: oidc | service_token | dev_headers.
+	Via string
 }
 
 // Has сообщает, есть ли у субъекта роль.

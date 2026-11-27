@@ -1,29 +1,139 @@
-# Enterprise small / локальная разработка (без SLA 99.9%, §3.5). Запуск: make up
-# ВНИМАНИЕ: dev-аутентификация и симулятор включены — только для локальной разработки.
+# AdminTwin — полный стек на одной машине (Enterprise small / разработка, без SLA 99.9%, §3.5).
+#
+#   cp infra/docker/.env.example infra/docker/.env   # заполнить секреты
+#   docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env up --build -d
+#   UI: http://localhost:3000   API: http://localhost:8080   метрики: http://localhost:9464
+#
+# Профили (необязательные):  --profile observability (VictoriaMetrics + Loki), --profile vault (OpenBao dev).
+# Без .env-настроек dev-режимы выключены: нужны OIDC, Vault и ключи LLM. Для локального знакомства
+# .env.example включает симулятор, dev-аутентификацию и офлайн-модель — ТОЛЬКО для разработки.
 name: admintwin
+
+x-hardening: &hardening
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  restart: unless-stopped
+
 services:
-  core:
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.core
-    image: admintwin-core:dev
-    environment:
-      ADMINTWIN_DEV_AUTH: "true"
-      ADMINTWIN_SIMULATOR: "true"
-      ADMINTWIN_FIXTURES: /opt/admintwin/infra/dev/fixtures.yaml
-    ports: ["127.0.0.1:8080:8080"]
-    read_only: true
-    security_opt: ["no-new-privileges:true"]
-    cap_drop: [ALL]
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: admintwin
       POSTGRES_USER: admintwin_owner
       POSTGRES_PASSWORD: ${ADMINTWIN_PG_PASSWORD:?set ADMINTWIN_PG_PASSWORD in .env}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ../../db/migrations/0001_init.up.sql:/docker-entrypoint-initdb.d/0001_init.up.sql:ro
-    ports: ["127.0.0.1:5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admintwin_owner -d admintwin"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  nats:
+    image: nats:2.10-alpine
+    command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
+    volumes: [natsdata:/data]
+    <<: *hardening
+    read_only: false
+
+  core:
+    <<: *hardening
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.core
+    image: admintwin-core:${ADMINTWIN_VERSION:-dev}
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      # Миграции применяются при старте; владелец схемы — суперпользователь контейнера postgres,
+      # запросы приложения выполняются под ролью admintwin_app (RLS).
+      ADMINTWIN_DATABASE_URL: postgres://admintwin_owner:${ADMINTWIN_PG_PASSWORD}@postgres:5432/admintwin?sslmode=disable
+      ADMINTWIN_SERVICE_TOKEN: ${ADMINTWIN_SERVICE_TOKEN:?set ADMINTWIN_SERVICE_TOKEN in .env (>= 32 chars)}
+      ADMINTWIN_AUDIT_SIGNING_KEY: ${ADMINTWIN_AUDIT_SIGNING_KEY:?set ADMINTWIN_AUDIT_SIGNING_KEY in .env}
+      ADMINTWIN_PII_MASTER_KEY: ${ADMINTWIN_PII_MASTER_KEY:?set ADMINTWIN_PII_MASTER_KEY in .env}
+      ADMINTWIN_ORCHESTRATOR_URL: http://orchestrator:8090
+      ADMINTWIN_METRICS_ADDR: ":9464"
+      # По умолчанию выключены; dev-значения задаются явно в .env (см. .env.example).
+      ADMINTWIN_SIMULATOR: ${ADMINTWIN_SIMULATOR:-false}
+      ADMINTWIN_DEV_AUTH: ${ADMINTWIN_DEV_AUTH:-false}
+      ADMINTWIN_ALLOW_DEV_WITH_DB: ${ADMINTWIN_ALLOW_DEV_WITH_DB:-false}
+      ADMINTWIN_FIXTURES: ${ADMINTWIN_FIXTURES:-}
+      ADMINTWIN_INCIDENT_AUTO_TRIAGE: ${ADMINTWIN_INCIDENT_AUTO_TRIAGE:-true}
+      ADMINTWIN_SYSLOG_ADDR: ${ADMINTWIN_SYSLOG_ADDR:-}
+      ADMINTWIN_OIDC_ISSUER: ${ADMINTWIN_OIDC_ISSUER:-}
+      ADMINTWIN_OIDC_AUDIENCE: ${ADMINTWIN_OIDC_AUDIENCE:-}
+      ADMINTWIN_VICTORIAMETRICS_URL: ${ADMINTWIN_VICTORIAMETRICS_URL:-}
+      ADMINTWIN_LOKI_URL: ${ADMINTWIN_LOKI_URL:-}
+      VAULT_ADDR: ${VAULT_ADDR:-}
+      VAULT_TOKEN: ${VAULT_TOKEN:-}
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9464:9464"
+    healthcheck:
+      # distroless без shell: проверку выполняет оркестрация (readiness — /api/v1/health/platform).
+      disable: true
+
+  orchestrator:
+    <<: *hardening
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.orchestrator
+    image: admintwin-orchestrator:${ADMINTWIN_VERSION:-dev}
+    depends_on: [core, nats]
+    environment:
+      ADMINTWIN_CORE_URL: http://core:8080
+      ADMINTWIN_SERVICE_TOKEN: ${ADMINTWIN_SERVICE_TOKEN}
+      ADMINTWIN_NATS_URL: nats://nats:4222
+      # true — детерминированная офлайн-модель (без вызовов LLM). Для реальных провайдеров: false +
+      # ADMINTWIN_AI_CONFIG и ключи (BYO, §6.1).
+      ADMINTWIN_AI_OFFLINE_FAKE: ${ADMINTWIN_AI_OFFLINE_FAKE:-true}
+      ADMINTWIN_AI_CONFIG: ${ADMINTWIN_AI_CONFIG:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    tmpfs: [/tmp]
+
+  web:
+    <<: *hardening
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.web
+      args:
+        ADMINTWIN_CORE_URL: http://core:8080
+        NEXT_PUBLIC_OIDC_ISSUER: ${NEXT_PUBLIC_OIDC_ISSUER:-}
+    image: admintwin-web:${ADMINTWIN_VERSION:-dev}
+    depends_on: [core]
+    ports: ["127.0.0.1:3000:3000"]
+    tmpfs: [/tmp, /app/.next/cache]
+
+  victoriametrics:
+    profiles: [observability]
+    image: victoriametrics/victoria-metrics:v1.106.1
+    command: ["-storageDataPath=/storage", "-retentionPeriod=15d"]
+    volumes: [vmdata:/storage]
+    restart: unless-stopped
+
+  loki:
+    profiles: [observability]
+    image: grafana/loki:3.3.2
+    # local-config: auth_enabled=false — изоляция tenant держится на метке tenant_id, которую ставит ядро.
+    # В production включите auth_enabled (X-Scope-OrgID на tenant).
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    volumes: [lokidata:/loki]
+    restart: unless-stopped
+
+  openbao:
+    profiles: [vault]
+    image: openbao/openbao:2.1.0
+    # DEV-режим: незапечатанный, root-токен из .env, данные в памяти. Только для разработки.
+    command: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN:-}
+    cap_add: [IPC_LOCK]
+    ports: ["127.0.0.1:8200:8200"]
+
 volumes:
   pgdata: {}
+  natsdata: {}
+  vmdata: {}
+  lokidata: {}

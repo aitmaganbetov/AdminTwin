@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import pytest
-from fakes import FakeProvider, make_registry
 
 from admintwin_ai.budgets import BudgetState
 from admintwin_ai.classification import DataClass, TaskClass
 from admintwin_ai.profiles import CapabilityRequirements, ModelProfile, ProfileRegistry
 from admintwin_ai.providers import Capability, ConnectionMode, ProviderCapabilities
 from admintwin_ai.routing.circuit_breaker import BreakerBoard, BreakerState, CircuitBreaker
-from admintwin_ai.routing.router import RouteStatus, Router, RoutingRequest, TenantAIPolicy
+from admintwin_ai.routing.router import Router, RouteStatus, RoutingRequest, TenantAIPolicy
+
+from fakes import FakeProvider, make_registry
 
 TENANT = TenantAIPolicy(tenant_id="t1", local_profile="local-default")
 

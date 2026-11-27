@@ -43,7 +43,13 @@ func TestPostgresStore(t *testing.T) {
 	c.Close(ctx)
 
 	cfg := app.Config{Root: "../..", FixturesPath: "../../infra/dev/fixtures.yaml", DevAuth: true, Simulator: true,
-		DatabaseURL: url, Migrate: true, AuditSigningKey: key32(), PIIMasterKey: key32()}
+		DatabaseURL: url, Migrate: true, AuditSigningKey: key32(), PIIMasterKey: key32(),
+		Getenv: func(k string) string {
+			if k == "ADMINTWIN_ALLOW_DEV_WITH_DB" {
+				return "true"
+			}
+			return os.Getenv(k)
+		}}
 	mk := func() (*app.App, *env) {
 		a, err := app.New(cfg)
 		if err != nil {

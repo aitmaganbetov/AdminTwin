@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,5 +134,23 @@ func TestOIDCAndServiceTokenAuth(t *testing.T) {
 	other := i.token("eng-b", tenantB, []string{"tenant_admin"}, nil, []string{"otp"})
 	if r := call(t, srv, "GET", "/api/v1/changes/"+id, nil, bearer(other)); r.Status != 404 {
 		t.Fatalf("cross-tenant via OIDC: %d", r.Status)
+	}
+}
+
+// Ревью №8: dev-аутентификация и симулятор не запускаются в production-конфигурации.
+func TestDevFeaturesRefusedInProductionConfig(t *testing.T) {
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	cases := map[string]app.Config{
+		"dev auth + OIDC":  {DevAuth: true, OIDCIssuer: "https://sso.example", OIDCAudience: "x"},
+		"simulator + OIDC": {Simulator: true, OIDCIssuer: "https://sso.example", OIDCAudience: "x"},
+		"dev auth + Vault": {DevAuth: true, Getenv: env(map[string]string{"VAULT_ADDR": "https://vault"})},
+		"dev auth + DB":    {DevAuth: true, DatabaseURL: "postgres://x@127.0.0.1:1/x", Getenv: env(nil)},
+		"simulator + DB":   {Simulator: true, DatabaseURL: "postgres://x@127.0.0.1:1/x", Getenv: env(nil)},
+	}
+	for name, cfg := range cases {
+		cfg.Root = "../.."
+		if _, err := app.New(cfg); err == nil || !strings.Contains(err.Error(), "development") {
+			t.Errorf("%s: must refuse to start, got %v", name, err)
+		}
 	}
 }

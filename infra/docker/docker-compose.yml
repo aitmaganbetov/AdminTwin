@@ -5,8 +5,8 @@
 #   UI: http://localhost:3000   API: http://localhost:8080   метрики: http://localhost:9464
 #
 # Профили (необязательные):  --profile observability (VictoriaMetrics + Loki), --profile vault (OpenBao dev).
-# По умолчанию включены симулятор инфраструктуры, dev-аутентификация и офлайн-модель AI —
-# для production задайте ADMINTWIN_SIMULATOR=false, ADMINTWIN_DEV_AUTH=false, OIDC, Vault и ключи LLM.
+# Без .env-настроек dev-режимы выключены: нужны OIDC, Vault и ключи LLM. Для локального знакомства
+# .env.example включает симулятор, dev-аутентификацию и офлайн-модель — ТОЛЬКО для разработки.
 name: admintwin
 
 x-hardening: &hardening
@@ -54,9 +54,11 @@ services:
       ADMINTWIN_PII_MASTER_KEY: ${ADMINTWIN_PII_MASTER_KEY:?set ADMINTWIN_PII_MASTER_KEY in .env}
       ADMINTWIN_ORCHESTRATOR_URL: http://orchestrator:8090
       ADMINTWIN_METRICS_ADDR: ":9464"
-      ADMINTWIN_SIMULATOR: ${ADMINTWIN_SIMULATOR:-true}
-      ADMINTWIN_DEV_AUTH: ${ADMINTWIN_DEV_AUTH:-true}
-      ADMINTWIN_FIXTURES: ${ADMINTWIN_FIXTURES:-/opt/admintwin/infra/dev/fixtures.yaml}
+      # По умолчанию выключены; dev-значения задаются явно в .env (см. .env.example).
+      ADMINTWIN_SIMULATOR: ${ADMINTWIN_SIMULATOR:-false}
+      ADMINTWIN_DEV_AUTH: ${ADMINTWIN_DEV_AUTH:-false}
+      ADMINTWIN_ALLOW_DEV_WITH_DB: ${ADMINTWIN_ALLOW_DEV_WITH_DB:-false}
+      ADMINTWIN_FIXTURES: ${ADMINTWIN_FIXTURES:-}
       ADMINTWIN_INCIDENT_AUTO_TRIAGE: ${ADMINTWIN_INCIDENT_AUTO_TRIAGE:-true}
       ADMINTWIN_SYSLOG_ADDR: ${ADMINTWIN_SYSLOG_ADDR:-}
       ADMINTWIN_OIDC_ISSUER: ${ADMINTWIN_OIDC_ISSUER:-}

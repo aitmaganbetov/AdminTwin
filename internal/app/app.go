@@ -172,8 +172,31 @@ func (a *App) loadTenantsFromDB(ctx context.Context) error {
 	})
 }
 
+// checkDevGuards — dev-аутентификация и симулятор не сочетаются с production-конфигурацией.
+func checkDevGuards(cfg Config, getenv func(string) string) error {
+	dev := cfg.DevAuth || cfg.Simulator
+	if !dev {
+		return nil
+	}
+	if cfg.OIDCIssuer != "" || getenv("VAULT_ADDR") != "" {
+		return fmt.Errorf("ADMINTWIN_DEV_AUTH/ADMINTWIN_SIMULATOR cannot be combined with OIDC or Vault: these are development-only features")
+	}
+	if cfg.DatabaseURL != "" && getenv("ADMINTWIN_ALLOW_DEV_WITH_DB") != "true" {
+		return fmt.Errorf("development mode with a database requires ADMINTWIN_ALLOW_DEV_WITH_DB=true (never set it in production)")
+	}
+	return nil
+}
+
 // New собирает приложение. Любая ошибка реестров — отказ старта (fail closed).
 func New(cfg Config) (*App, error) {
+	if err := checkDevGuards(cfg, func(k string) string {
+		if cfg.Getenv != nil {
+			return cfg.Getenv(k)
+		}
+		return os.Getenv(k)
+	}); err != nil {
+		return nil, err
+	}
 	cat, err := runbook.LoadDir(filepath.Join(cfg.Root, "runbooks", "catalog"))
 	if err != nil {
 		return nil, fmt.Errorf("runbook catalog: %w", err)

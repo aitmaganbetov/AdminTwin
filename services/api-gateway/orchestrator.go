@@ -82,9 +82,16 @@ func (p *OrchestratorProxy) forward(w http.ResponseWriter, r *http.Request, a id
 				return
 			}
 		}
-		doc["tenant_id"] = a.TenantID
-		if _, ok := doc["requested_by"]; ok || strings.HasSuffix(upstreamPath, "/v1/tasks") {
-			doc["requested_by"] = a.ID
+		// Идентичность в теле — только для создания задач и сессий (их модели содержат tenant_id/requested_by);
+		// в остальных телах этих полей быть не должно, tenant берётся оркестратором из заголовков ядра.
+		switch upstreamPath {
+		case "/v1/tasks":
+			doc["tenant_id"], doc["requested_by"] = a.TenantID, a.ID
+		case "/v1/chat/sessions":
+			doc["tenant_id"] = a.TenantID
+		default:
+			delete(doc, "tenant_id")
+			delete(doc, "requested_by")
 		}
 		b, _ := json.Marshal(doc)
 		body = bytes.NewReader(b)

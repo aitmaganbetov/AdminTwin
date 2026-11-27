@@ -270,6 +270,12 @@ func (s *Server) createChange(w http.ResponseWriter, r *http.Request, a identity
 		s.fail(w, r, problem.New(problem.SeparationOfDuties, "AI agent cannot initiate break-glass emergency change"))
 		return
 	}
+	if in.Type == policy.ChangeEmergency {
+		if err := requireMFA(a); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
 	cr, err := s.Changes.Propose(a, in)
 	if err != nil {
 		s.fail(w, r, err)
@@ -323,6 +329,10 @@ type decisionBody struct {
 }
 
 func (s *Server) decide(w http.ResponseWriter, r *http.Request, a identity.Actor) {
+	if err := requireMFA(a); err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	var b decisionBody
 	if err := decode(r, &b); err != nil {
 		s.fail(w, r, err)
@@ -395,6 +405,10 @@ func (s *Server) killStatus(w http.ResponseWriter, _ *http.Request, a identity.A
 }
 
 func (s *Server) killSet(w http.ResponseWriter, r *http.Request, a identity.Actor) {
+	if err := requireMFA(a); err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	var b killBody
 	if err := decode(r, &b); err != nil {
 		s.fail(w, r, err)

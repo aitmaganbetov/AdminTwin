@@ -29,6 +29,7 @@ const (
 	IdempotencyMismatch Code = "idempotency-key-reused"
 	BadRequest          Code = "bad-request"
 	Internal            Code = "internal"
+	MFARequired         Code = "mfa-required"
 )
 
 var defaults = map[Code]struct {
@@ -49,6 +50,7 @@ var defaults = map[Code]struct {
 	IdempotencyMismatch: {http.StatusUnprocessableEntity, "Idempotency key reused with different payload"},
 	BadRequest:          {http.StatusBadRequest, "Bad request"},
 	Internal:            {http.StatusInternalServerError, "Internal error"},
+	MFARequired:         {http.StatusForbidden, "Multi-factor authentication required"},
 }
 
 // Problem — тело ответа RFC 9457 с расширениями AdminTwin.

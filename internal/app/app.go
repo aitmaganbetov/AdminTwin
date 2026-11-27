@@ -15,6 +15,7 @@ import (
 
 	"github.com/aitmaganbetov/admintwin/pkg/httpapi"
 	"github.com/aitmaganbetov/admintwin/pkg/killswitch"
+	"github.com/aitmaganbetov/admintwin/pkg/oidc"
 	api "github.com/aitmaganbetov/admintwin/services/api-gateway"
 	"github.com/aitmaganbetov/admintwin/services/audit"
 	registry "github.com/aitmaganbetov/admintwin/services/capability-registry"
@@ -33,6 +34,12 @@ type Config struct {
 	Root         string // корень репозитория (каталоги runbooks/, capabilities/, standards/, ai/tools/)
 	FixturesPath string // демо-данные; пусто — без данных
 	DevAuth      bool
+	// OIDC (пользователи): issuer и audience обязательны вместе.
+	OIDCIssuer   string
+	OIDCAudience string
+	OIDCJWKSURL  string
+	// ServiceToken — общий секрет сервисов (оркестратор, сборщики), ≥ 32 символов.
+	ServiceToken string
 	Simulator    bool
 	Version      string
 	Logger       *slog.Logger
@@ -143,9 +150,20 @@ func New(cfg Config) (*App, error) {
 		return nil, fmt.Errorf("tool service: %w", err)
 	}
 
-	auth := api.DenyAll
-	if cfg.DevAuth {
-		auth = api.DevHeaderAuth
+	ac := api.AuthConfig{DevHeaders: cfg.DevAuth, ServiceToken: cfg.ServiceToken}
+	if cfg.ServiceToken != "" && len(cfg.ServiceToken) < 32 {
+		return nil, fmt.Errorf("ADMINTWIN_SERVICE_TOKEN must be at least 32 characters")
+	}
+	if cfg.OIDCIssuer != "" {
+		v, err := oidc.New(oidc.Config{Issuer: cfg.OIDCIssuer, Audience: cfg.OIDCAudience, JWKSURL: cfg.OIDCJWKSURL})
+		if err != nil {
+			return nil, err
+		}
+		ac.OIDC = v
+	}
+	auth := api.Authenticator(api.DenyAll)
+	if ac.OIDC != nil || ac.ServiceToken != "" || ac.DevHeaders {
+		auth = api.NewAuthenticator(ac)
 	}
 	a.Server = &api.Server{
 		Auth: auth, Changes: a.Coordinator, Inventory: a.Inventory, Catalog: cat, Registry: reg, Audit: a.Audit,

@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import Callable
 from typing import Any, Literal, Protocol
@@ -94,6 +95,7 @@ class ToolInvoker:
         self._clock = clock
         self._secret_masker = Masker(secrets_only=True)
         self.calls = 0  # счётчик выполненных вызовов (для бюджета tool_calls)
+        self._calls_lock = threading.Lock()
 
     def invoke_call(self, ctx: ToolContext, call: ToolCall) -> ToolResult:
         if call.malformed:
@@ -132,7 +134,8 @@ class ToolInvoker:
             return self._refuse(ctx, name, kind, params, "rate_limited",
                                 f"limit {tool.contract.rate_limit_per_minute}/min")
 
-        self.calls += 1
+        with self._calls_lock:
+            self.calls += 1
         try:
             output = tool.handler(ctx, params)
         except ToolRefusal as exc:

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "admintwin-ai"
 version = "0.1.0"
-description = "AdminTwin AI layer: AI Provider Layer (M21), Tool Layer, agent contracts, Commander skeleton, evals (M22)"
+description = "AdminTwin AI layer and orchestrator service: AI Provider Layer (M21), Tool Layer, Commander (M01), inter-agent bus, evals (M22)"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Proprietary" }
@@ -16,7 +16,16 @@ dependencies = [
   "pydantic>=2.7,<3",
   "jsonschema>=4.22,<5",
   "pyyaml>=6.0",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "nats-py>=2.9,<3",
 ]
+
+[project.scripts]
+admintwin-orchestrator = "admintwin_ai.service.__main__:main"
+admintwin-eval = "admintwin_ai.evals.run:main"
+admintwin-eval-gate = "admintwin_ai.evals.gate:main"
+admintwin-llm-compat = "admintwin_ai.providers.compat_check:main"
 
 [project.optional-dependencies]
 dev = [
@@ -25,6 +34,7 @@ dev = [
   "mypy>=1.10",
   "types-PyYAML",
   "types-jsonschema",
+  "pytest-asyncio>=0.24",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -43,6 +53,8 @@ packages = ["src/admintwin_ai"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 100
@@ -61,7 +73,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["admintwin_ai"]
-known-local-folder = ["fakes", "support"]
+known-local-folder = ["fakes", "support", "svc", "bus_cases", "test_prompt_injection"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "S108", "S311"]

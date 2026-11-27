@@ -5,8 +5,9 @@
 принимают Policy Engine и человек в Approval Service; у агента нет
 инструментов согласования или исполнения (T-CAP-002, T-CAP-003).
 
-Dev-режим идентичности (до JWT/OIDC): заголовки ``X-AdminTwin-Tenant``,
-``X-AdminTwin-Actor``, ``X-AdminTwin-Actor-Kind: ai_agent``. Повтор при
+Сервисная идентичность (contracts §0): ``X-AdminTwin-Service-Token`` (если
+задан) + ``X-AdminTwin-Tenant``, ``X-AdminTwin-Actor``,
+``X-AdminTwin-Actor-Kind: ai_agent``. Повтор при
 сетевой ошибке/5xx использует тот же ``Idempotency-Key`` (защита от
 дублей, §18.6 Replay).
 """
@@ -19,6 +20,7 @@ from typing import Any
 
 import httpx
 
+from admintwin_ai.tools.http_backend import SERVICE_TOKEN_HEADER
 from admintwin_ai.tools.invoker import ToolContext
 from admintwin_ai.tools.registry import ToolBackendError, ToolOutput, ToolRefusal
 
@@ -35,11 +37,13 @@ class ChangeProposeHandler:
         idempotency_key_factory: Callable[[], str] = lambda: str(uuid.uuid4()),
         max_attempts: int = 2,
         timeout_s: float = 10.0,
+        service_token: str | None = None,
     ) -> None:
         self._url = core_url.rstrip("/") + CHANGES_PATH
         self._client = client or httpx.Client(timeout=timeout_s)
         self._new_key = idempotency_key_factory
         self._max_attempts = max(1, max_attempts)
+        self._service_token = service_token
 
     def __call__(self, ctx: ToolContext, params: dict[str, Any]) -> ToolOutput:
         runbook_id = params["runbook_id"]
@@ -60,6 +64,8 @@ class ChangeProposeHandler:
             "X-AdminTwin-Actor-Kind": "ai_agent",
             "Accept": "application/json, application/problem+json",
         }
+        if self._service_token:
+            headers[SERVICE_TOKEN_HEADER] = self._service_token
         if ctx.correlation_id:
             headers["X-Correlation-Id"] = ctx.correlation_id
 

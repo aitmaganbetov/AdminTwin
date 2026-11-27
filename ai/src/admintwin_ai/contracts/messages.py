@@ -121,6 +121,17 @@ class MessageDeduplicator:
         self._seen: OrderedDict[uuid.UUID, None] = OrderedDict()
         self._capacity = capacity
 
+    def seen(self, message: AgentMessage) -> bool:
+        """Сообщение уже успешно обработано (без отметки)."""
+        return message.message_id in self._seen
+
+    def mark(self, message: AgentMessage) -> None:
+        """Отметить обработанным (после успешной обработки — at-least-once)."""
+        self._seen[message.message_id] = None
+        self._seen.move_to_end(message.message_id)
+        if len(self._seen) > self._capacity:
+            self._seen.popitem(last=False)
+
     def first_delivery(self, message: AgentMessage) -> bool:
         if message.message_id in self._seen:
             self._seen.move_to_end(message.message_id)

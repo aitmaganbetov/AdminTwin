@@ -36,7 +36,39 @@ type Asset struct {
 	Objects map[string][]string `yaml:"objects,omitempty" json:"objects,omitempty"`
 	// Protected — объекты, которые нельзя трогать автоматикой.
 	Protected []string `yaml:"protected,omitempty" json:"protected,omitempty"`
+	// Connection — как коннекторы достигают актива. Секретов не содержит: только ссылка на Vault.
+	Connection *Connection `yaml:"connection,omitempty" json:"connection,omitempty"`
+	// Source — происхождение записи: discovery | user | import.
+	Source string `yaml:"source,omitempty" json:"source,omitempty"`
 }
+
+// Connection — параметры доступа к активу для коннекторов и сборщиков.
+type Connection struct {
+	// Method — ssh | docker_api | postgres | fortigate_api | snmpv3 | winrm.
+	Method  string `yaml:"method" json:"method"`
+	Address string `yaml:"address" json:"address"`
+	Port    int    `yaml:"port,omitempty" json:"port,omitempty"`
+	// CredentialRef — путь в Vault (например, "kv/data/tenants/<tid>/assets/<id>/ssh"). Агентам не выдаётся.
+	CredentialRef string `yaml:"credential_ref,omitempty" json:"credential_ref,omitempty"`
+	// TLS — для docker_api/fortigate_api: проверка сертификата обязательна, если не указано иное.
+	TLSServerName string `yaml:"tls_server_name,omitempty" json:"tls_server_name,omitempty"`
+	TLSSkipVerify bool   `yaml:"tls_skip_verify,omitempty" json:"tls_skip_verify,omitempty"`
+	// HostKey — ожидаемый SSH host key (authorized_keys формат); без него SSH-подключение отклоняется.
+	HostKey string `yaml:"host_key,omitempty" json:"host_key,omitempty"`
+}
+
+// Repository — хранилище CMDB (in-memory Store или PostgreSQL). Все методы tenant-scoped.
+type Repository interface {
+	Put(a Asset) error
+	Get(tenantID, id string) (*Asset, bool)
+	List(tenantID string) []Asset
+	SetLegalHold(tenantID, id string, hold bool) bool
+	AddDependency(d Dependency) error
+	Dependencies(tenantID string) []Dependency
+	BlastRadius(tenantID, assetID string, maxDepth int) ([]Impacted, error)
+}
+
+var _ Repository = (*Store)(nil)
 
 // HasObject — существует ли дочерний объект данного вида.
 func (a *Asset) HasObject(kind, value string) bool {

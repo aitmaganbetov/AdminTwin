@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aitmaganbetov/admintwin/pkg/httpapi"
 	"github.com/aitmaganbetov/admintwin/pkg/identity"
 	"github.com/aitmaganbetov/admintwin/pkg/killswitch"
 	"github.com/aitmaganbetov/admintwin/pkg/problem"
@@ -33,7 +34,7 @@ type Authenticator func(r *http.Request) (identity.Actor, error)
 type Server struct {
 	Auth      Authenticator
 	Changes   *change.Coordinator
-	Inventory *inventory.Store
+	Inventory inventory.Repository
 	Catalog   *runbook.Catalog
 	Registry  *registry.Registry
 	Audit     *audit.Log
@@ -44,14 +45,16 @@ type Server struct {
 	StartedAt time.Time
 	Version   string
 	Simulator bool
+	// Modules — сервисы, публикующие собственные маршруты (incidents, telemetry, discovery, connectors, ...).
+	Modules []httpapi.Module
 }
 
-// Handler строит маршруты.
+// Handler строит маршруты ядра и подключённых модулей.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health/platform", s.health)
 
-	auth := func(h func(http.ResponseWriter, *http.Request, identity.Actor)) http.HandlerFunc {
+	wrap := func(h httpapi.Handler) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			a, err := s.Auth(r)
 			if err != nil {
@@ -65,31 +68,35 @@ func (s *Server) Handler() http.Handler {
 			h(w, r.WithContext(identity.WithActor(r.Context(), a)), a)
 		}
 	}
+	rt := &httpapi.Router{Mux: mux, Wrap: wrap}
 
-	mux.HandleFunc("GET /api/v1/assets", auth(s.listAssets))
-	mux.HandleFunc("GET /api/v1/assets/{id}", auth(s.getAsset))
-	mux.HandleFunc("GET /api/v1/assets/{id}/blast-radius", auth(s.blastRadius))
-	mux.HandleFunc("GET /api/v1/topology", auth(s.topology))
-	mux.HandleFunc("GET /api/v1/runbooks", auth(s.listRunbooks))
-	mux.HandleFunc("GET /api/v1/capabilities", auth(s.listCapabilities))
-	mux.HandleFunc("GET /api/v1/capabilities/{id}/tests", auth(s.capabilityTests))
-	mux.HandleFunc("GET /api/v1/capabilities/traceability", auth(s.traceability))
-	mux.HandleFunc("GET /api/v1/standards", auth(s.listStandards))
+	rt.Handle("GET /api/v1/assets", s.listAssets)
+	rt.Handle("GET /api/v1/assets/{id}", s.getAsset)
+	rt.Handle("GET /api/v1/assets/{id}/blast-radius", s.blastRadius)
+	rt.Handle("GET /api/v1/topology", s.topology)
+	rt.Handle("GET /api/v1/runbooks", s.listRunbooks)
+	rt.Handle("GET /api/v1/capabilities", s.listCapabilities)
+	rt.Handle("GET /api/v1/capabilities/{id}/tests", s.capabilityTests)
+	rt.Handle("GET /api/v1/capabilities/traceability", s.traceability)
+	rt.Handle("GET /api/v1/standards", s.listStandards)
 
-	mux.HandleFunc("POST /api/v1/changes", auth(s.createChange))
-	mux.HandleFunc("GET /api/v1/changes", auth(s.listChanges))
-	mux.HandleFunc("GET /api/v1/changes/{id}", auth(s.getChange))
-	mux.HandleFunc("POST /api/v1/changes/{id}/decisions", auth(s.decide))
-	mux.HandleFunc("POST /api/v1/changes/{id}/cancel", auth(s.cancelChange))
-	mux.HandleFunc("GET /api/v1/changes/{id}/executions", auth(s.changeExecutions))
-	mux.HandleFunc("GET /api/v1/executions/{id}", auth(s.getExecution))
+	rt.Handle("POST /api/v1/changes", s.createChange)
+	rt.Handle("GET /api/v1/changes", s.listChanges)
+	rt.Handle("GET /api/v1/changes/{id}", s.getChange)
+	rt.Handle("POST /api/v1/changes/{id}/decisions", s.decide)
+	rt.Handle("POST /api/v1/changes/{id}/cancel", s.cancelChange)
+	rt.Handle("GET /api/v1/changes/{id}/executions", s.changeExecutions)
+	rt.Handle("GET /api/v1/executions/{id}", s.getExecution)
 
-	mux.HandleFunc("GET /api/v1/kill-switch", auth(s.killStatus))
-	mux.HandleFunc("POST /api/v1/kill-switch", auth(s.killSet))
-	mux.HandleFunc("GET /api/v1/audit-logs", auth(s.auditLogs))
-	mux.HandleFunc("GET /api/v1/audit-logs/integrity", auth(s.auditIntegrity))
-	mux.HandleFunc("GET /api/v1/evidence/{id}", auth(s.getEvidence))
+	rt.Handle("GET /api/v1/kill-switch", s.killStatus)
+	rt.Handle("POST /api/v1/kill-switch", s.killSet)
+	rt.Handle("GET /api/v1/audit-logs", s.auditLogs)
+	rt.Handle("GET /api/v1/audit-logs/integrity", s.auditIntegrity)
+	rt.Handle("GET /api/v1/evidence/{id}", s.getEvidence)
 
+	for _, m := range s.Modules {
+		m.Routes(rt)
+	}
 	return s.middleware(mux)
 }
 

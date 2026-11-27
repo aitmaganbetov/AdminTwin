@@ -43,7 +43,7 @@ class MessageType(StrEnum):
 
 
 Priority = Literal["low", "normal", "high", "critical"]
-Environment = Literal["production", "staging", "test", "development", "dr"]
+Environment = Literal["production", "staging", "dev", "test"]  # ТЗ §8.3
 Sensitivity = Literal["public", "internal", "confidential", "pii", "secret"]
 
 _AGENT_ID = r"^[a-z][a-z0-9-]{1,62}$"

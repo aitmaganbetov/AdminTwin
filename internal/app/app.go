@@ -13,6 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/aitmaganbetov/admintwin/pkg/httpapi"
 	"github.com/aitmaganbetov/admintwin/pkg/killswitch"
 	api "github.com/aitmaganbetov/admintwin/services/api-gateway"
 	"github.com/aitmaganbetov/admintwin/services/audit"
@@ -24,6 +25,7 @@ import (
 	"github.com/aitmaganbetov/admintwin/services/execution-gateway/sim"
 	"github.com/aitmaganbetov/admintwin/services/inventory"
 	"github.com/aitmaganbetov/admintwin/services/policy"
+	toolsvc "github.com/aitmaganbetov/admintwin/services/tool-service"
 )
 
 // Config — параметры сборки.
@@ -41,6 +43,8 @@ type App struct {
 	Server      *api.Server
 	Coordinator *change.Coordinator
 	Inventory   *inventory.Store
+	Tools       *toolsvc.Service
+	Registry    *registry.Registry
 	Audit       *audit.Log
 	AuditPub    ed25519.PublicKey
 	Kill        *killswitch.Switch
@@ -133,6 +137,12 @@ func New(cfg Config) (*App, error) {
 	// Без симулятора и без коннекторов движков нет: исполнения завершаются отказом (fail closed).
 	a.Coordinator = change.New(cat, a.Inventory, policy.Builtin{}, a.Tenant, gw, a.Audit, a.Kill)
 
+	a.Registry = reg
+	a.Tools, err = toolsvc.Load(filepath.Join(cfg.Root, "ai", "tools", "read"), a.Inventory, reg.ToolScope, a.Audit)
+	if err != nil {
+		return nil, fmt.Errorf("tool service: %w", err)
+	}
+
 	auth := api.DenyAll
 	if cfg.DevAuth {
 		auth = api.DevHeaderAuth
@@ -141,6 +151,7 @@ func New(cfg Config) (*App, error) {
 		Auth: auth, Changes: a.Coordinator, Inventory: a.Inventory, Catalog: cat, Registry: reg, Audit: a.Audit,
 		Evidence: a.Evidence, Kill: a.Kill, Tenants: a.Tenant, Log: cfg.Logger, StartedAt: time.Now(),
 		Version: cfg.Version, Simulator: cfg.Simulator,
+		Modules: []httpapi.Module{a.Tools},
 	}
 	return a, nil
 }

@@ -123,7 +123,7 @@ func (s *Infra) HealthOK(_, asset, _ string) (bool, error) {
 
 // --- CredentialBroker ---
 
-func (s *Infra) Lease(_ context.Context, _, _ string, ttl time.Duration) (gateway.Lease, error) {
+func (s *Infra) Lease(_ context.Context, _, _, _ string, ttl time.Duration) (gateway.Lease, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.vaultDown {

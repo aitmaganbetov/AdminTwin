@@ -98,7 +98,7 @@ type Coordinator struct {
 	idem      map[string]string // tenant|actor|key -> change id
 	wg        sync.WaitGroup
 	Catalog   *runbook.Catalog
-	Inventory *inventory.Store
+	Inventory inventory.Repository
 	Policy    policy.Engine
 	Tenants   func(tenantID string) (policy.TenantPolicy, bool)
 	Gateway   *gateway.Gateway
@@ -108,7 +108,7 @@ type Coordinator struct {
 }
 
 // New создаёт координатор и подписывает его на kill switch.
-func New(cat *runbook.Catalog, inv *inventory.Store, pe policy.Engine, tenants func(string) (policy.TenantPolicy, bool),
+func New(cat *runbook.Catalog, inv inventory.Repository, pe policy.Engine, tenants func(string) (policy.TenantPolicy, bool),
 	gw *gateway.Gateway, al *audit.Log, ks *killswitch.Switch) *Coordinator {
 	c := &Coordinator{changes: map[string]*ChangeRequest{}, idem: map[string]string{}, Catalog: cat, Inventory: inv,
 		Policy: pe, Tenants: tenants, Gateway: gw, Audit: al, Kill: ks}

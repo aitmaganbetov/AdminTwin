@@ -131,3 +131,20 @@ func (d *DB) Migrate(ctx context.Context, dir string) ([]string, error) {
 	}
 	return applied, nil
 }
+
+// AppRole — адаптер для репозиториев, которые сами задают tenant (set_config): каждая транзакция
+// начинается под ролью admintwin_app, поэтому RLS действует и при подключении владельцем/суперпользователем.
+type AppRole struct{ DB *DB }
+
+// Begin начинает транзакцию под ролью admintwin_app.
+func (r AppRole) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := r.DB.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL ROLE admintwin_app"); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, fmt.Errorf("db: set role: %w", err)
+	}
+	return tx, nil
+}

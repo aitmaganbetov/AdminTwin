@@ -30,12 +30,16 @@ func main() {
 		DatabaseURL:  os.Getenv("ADMINTWIN_DATABASE_URL"),
 		Migrate:      os.Getenv("ADMINTWIN_DB_MIGRATE") != "false",
 		// Ключи — из секрет-хранилища развертывания (Vault Agent / Kubernetes Secret), не из репозитория.
-		AuditSigningKey: os.Getenv("ADMINTWIN_AUDIT_SIGNING_KEY"),
-		PIIMasterKey:    os.Getenv("ADMINTWIN_PII_MASTER_KEY"),
-		OrchestratorURL: os.Getenv("ADMINTWIN_ORCHESTRATOR_URL"),
-		Simulator:       os.Getenv("ADMINTWIN_SIMULATOR") == "true",
-		Version:         version,
-		Logger:          log,
+		AuditSigningKey:    os.Getenv("ADMINTWIN_AUDIT_SIGNING_KEY"),
+		PIIMasterKey:       os.Getenv("ADMINTWIN_PII_MASTER_KEY"),
+		OrchestratorURL:    os.Getenv("ADMINTWIN_ORCHESTRATOR_URL"),
+		VictoriaMetricsURL: os.Getenv("ADMINTWIN_VICTORIAMETRICS_URL"),
+		LokiURL:            os.Getenv("ADMINTWIN_LOKI_URL"),
+		SyslogAddr:         os.Getenv("ADMINTWIN_SYSLOG_ADDR"),
+		IncidentAutoTriage: os.Getenv("ADMINTWIN_INCIDENT_AUTO_TRIAGE") == "true",
+		Simulator:          os.Getenv("ADMINTWIN_SIMULATOR") == "true",
+		Version:            version,
+		Logger:             log,
 	}
 	if cfg.DevAuth {
 		log.Warn("DEV AUTH ENABLED: identity is taken from request headers; never use outside local development")
@@ -57,6 +61,10 @@ func main() {
 	defer stop()
 
 	go a.RunBackground(ctx, 30*time.Second, time.Hour)
+	if err := a.StartListeners(ctx, cfg.Simulator); err != nil {
+		log.Error("listeners failed", "error", err)
+		os.Exit(1)
+	}
 	// Метрики Prometheus — на отдельном (по умолчанию локальном) адресе, не через публичный API.
 	metricsSrv := &http.Server{Addr: env("ADMINTWIN_METRICS_ADDR", "127.0.0.1:9464"), ReadHeaderTimeout: 5 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

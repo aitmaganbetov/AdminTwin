@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aitmaganbetov/admintwin/internal/app"
+	"github.com/aitmaganbetov/admintwin/pkg/httpapi"
 	"github.com/aitmaganbetov/admintwin/pkg/identity"
 	"github.com/aitmaganbetov/admintwin/pkg/problem"
 	"github.com/aitmaganbetov/admintwin/services/telemetry"
@@ -41,7 +42,7 @@ func newEnv(t *testing.T) *env {
 	if err := tel.RegisterTools(a.Tools); err != nil {
 		t.Fatal(err)
 	}
-	a.Server.Modules = append(a.Server.Modules, tel)
+	a.Server.Modules = []httpapi.Module{a.Tools, tel} // тестовый экземпляр вместо штатного
 	srv := httptest.NewServer(a.Server.Handler())
 	t.Cleanup(srv.Close)
 	return &env{t: t, app: a, tel: tel, srv: srv}

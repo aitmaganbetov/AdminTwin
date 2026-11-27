@@ -32,8 +32,11 @@ jobs:
           PGPASSWORD: ci-only
           ADMINTWIN_TEST_DATABASE_URL: postgres://postgres:ci-only@localhost:5432/admintwin_test?sslmode=disable
           ADMINTWIN_TEST_STORE_URL: postgres://postgres:ci-only@localhost:5432/admintwin_store?sslmode=disable
+          ADMINTWIN_TEST_PG_CONNECTOR_URL: postgres://admintwin_ro:ro-ci-only@localhost:5432/appdb?sslmode=disable
         run: |
           psql -h localhost -U postgres -c "CREATE DATABASE admintwin_store"
+          psql -h localhost -U postgres -c "CREATE DATABASE appdb"
+          psql -h localhost -U postgres -c "CREATE ROLE admintwin_ro LOGIN PASSWORD 'ro-ci-only' IN ROLE pg_monitor"
           make test-db
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.3 ./...

@@ -128,9 +128,9 @@ type pgEnv struct {
 
 func integration(t *testing.T) pgEnv {
 	t.Helper()
-	raw := os.Getenv("ADMINTWIN_TEST_DATABASE_URL")
+	raw := os.Getenv("ADMINTWIN_TEST_PG_CONNECTOR_URL")
 	if raw == "" {
-		t.Skip("ADMINTWIN_TEST_DATABASE_URL is not set")
+		t.Skip("ADMINTWIN_TEST_PG_CONNECTOR_URL is not set")
 	}
 	u, err := url.Parse(raw)
 	if err != nil {

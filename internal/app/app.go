@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
 
+	"github.com/aitmaganbetov/admintwin/connectors"
+	"github.com/aitmaganbetov/admintwin/connectors/linux"
 	"github.com/aitmaganbetov/admintwin/pkg/db"
 	"github.com/aitmaganbetov/admintwin/pkg/httpapi"
 	"github.com/aitmaganbetov/admintwin/pkg/killswitch"
@@ -29,11 +32,15 @@ import (
 	registry "github.com/aitmaganbetov/admintwin/services/capability-registry"
 	change "github.com/aitmaganbetov/admintwin/services/change-coordinator"
 	evidence "github.com/aitmaganbetov/admintwin/services/compliance-evidence"
+	"github.com/aitmaganbetov/admintwin/services/discovery"
 	gateway "github.com/aitmaganbetov/admintwin/services/execution-gateway"
 	"github.com/aitmaganbetov/admintwin/services/execution-gateway/runbook"
 	"github.com/aitmaganbetov/admintwin/services/execution-gateway/sim"
+	"github.com/aitmaganbetov/admintwin/services/execution-gateway/vault"
+	"github.com/aitmaganbetov/admintwin/services/incidents"
 	"github.com/aitmaganbetov/admintwin/services/inventory"
 	"github.com/aitmaganbetov/admintwin/services/policy"
+	"github.com/aitmaganbetov/admintwin/services/telemetry"
 	toolsvc "github.com/aitmaganbetov/admintwin/services/tool-service"
 )
 
@@ -57,9 +64,17 @@ type Config struct {
 	PIIMasterKey string
 	// OrchestratorURL — AI-оркестратор (admintwin-orchestrator); пусто — AI-задачи недоступны.
 	OrchestratorURL string
-	Simulator       bool
-	Version         string
-	Logger          *slog.Logger
+	// Телеметрия: VictoriaMetrics + Loki (оба или ни одного — тогда in-memory, §3.5); syslog-приёмник (пусто — выключен).
+	VictoriaMetricsURL string
+	LokiURL            string
+	SyslogAddr         string
+	// IncidentAutoTriage — инцидент severity ≥ high сразу triaged и запускает RCA (§17.1 «алерт → RCA < 30 с»).
+	IncidentAutoTriage bool
+	// Getenv — источник прочих переменных (ретенция, Vault); по умолчанию os.Getenv.
+	Getenv    func(string) string
+	Simulator bool
+	Version   string
+	Logger    *slog.Logger
 }
 
 // App — собранное ядро.
@@ -73,6 +88,12 @@ type App struct {
 	// auditState — результат последней фоновой верификации цепочек.
 	auditMu    sync.Mutex
 	auditValid map[string]bool
+	Telemetry  *telemetry.Service
+	Incidents  *incidents.Service
+	Discovery  *discovery.Service
+	Connectors *connectors.Set
+	resolver   *telemetry.InventoryResolver
+	syslogAddr string
 	// Orchestrator — прокси к AI-оркестратору (nil, если не настроен).
 	Orchestrator *api.OrchestratorProxy
 	Registry     *registry.Registry
@@ -222,7 +243,43 @@ func New(cfg Config) (*App, error) {
 		}
 	}
 
+	getenv := cfg.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
 	gw := &gateway.Gateway{Evidence: a.Evidence, Kill: a.Kill}
+
+	// Vault и коннекторы. Без VAULT_ADDR исполнения невозможны (fail closed), чтение и мониторинг работают (§17.2).
+	var creds discovery.CredentialSource = noCredentials{}
+	var broker *vault.Broker
+	if getenv("VAULT_ADDR") != "" {
+		vcfg, err := vault.ConfigFromEnv()
+		if err != nil {
+			return nil, fmt.Errorf("vault: %w", err)
+		}
+		vcfg.Logger = cfg.Logger
+		if broker, err = vault.New(vcfg); err != nil {
+			return nil, fmt.Errorf("vault: %w", err)
+		}
+		creds = broker
+	} else if !cfg.Simulator {
+		slog.Warn("VAULT_ADDR is not set: executions are impossible until Vault is configured (read-only mode)")
+	}
+	var dirs, units []string
+	if rb, ok := cat.Get("linux.logs.rotate_cleanup"); ok {
+		dirs = rb.Parameters["directory"].Enum
+	}
+	if rb, ok := cat.Get("linux.service.restart"); ok {
+		units = rb.Parameters["unit"].Enum
+	}
+	a.Connectors = connectors.New(connectors.Config{Inventory: a.Inventory, Credentials: creds, Logger: cfg.Logger,
+		Linux: linux.Options{Sudo: getenv("ADMINTWIN_SSH_SUDO") == "true", LogDirectories: dirs, RestartUnits: units}})
+	if !cfg.Simulator {
+		gw.Engines, gw.Facts = a.Connectors.Engines(), a.Connectors.Facts()
+		if broker != nil {
+			gw.Broker = broker
+		}
+	}
 	if cfg.Simulator {
 		a.Sim = sim.New()
 		gw.Engines, gw.Facts, gw.Broker = a.Sim.Engines(), a.Sim, a.Sim
@@ -257,6 +314,60 @@ func New(cfg Config) (*App, error) {
 		return nil, fmt.Errorf("tool service: %w", err)
 	}
 
+	if !cfg.Simulator {
+		if err := a.Connectors.RegisterTools(a.Tools); err != nil {
+			return nil, fmt.Errorf("connector tools: %w", err)
+		}
+	}
+
+	// Телеметрия (M05).
+	retention, err := telemetry.RetentionFromEnv(getenv)
+	if err != nil {
+		return nil, err
+	}
+	var store telemetry.Store = telemetry.NewMemoryStore(telemetry.Limits{}, retention)
+	if cfg.VictoriaMetricsURL != "" && cfg.LokiURL != "" {
+		store = telemetry.Composite{Metrics: &telemetry.VictoriaMetrics{URL: cfg.VictoriaMetricsURL}, Logs: &telemetry.Loki{URL: cfg.LokiURL},
+			Events: telemetry.NewMemoryStore(telemetry.Limits{}, retention)}
+	} else if cfg.VictoriaMetricsURL != "" || cfg.LokiURL != "" {
+		return nil, fmt.Errorf("ADMINTWIN_VICTORIAMETRICS_URL and ADMINTWIN_LOKI_URL must be set together")
+	}
+	a.Telemetry = telemetry.NewService(store, a.Inventory)
+	a.Telemetry.ServiceToken = cfg.ServiceToken
+	if err := a.Telemetry.RegisterTools(a.Tools); err != nil {
+		return nil, fmt.Errorf("telemetry tools: %w", err)
+	}
+
+	// Инциденты (M06/M07).
+	var starter incidents.RCAStarter
+	if cfg.OrchestratorURL != "" {
+		oc, err := incidents.NewOrchestratorClient(cfg.OrchestratorURL, cfg.ServiceToken)
+		if err != nil {
+			return nil, err
+		}
+		starter = oc
+	}
+	var incRepo incidents.Repository = incidents.NewMemoryRepo()
+	if a.DB != nil {
+		incRepo = incidents.NewPGRepo(db.AppRole{DB: a.DB})
+	}
+	a.Incidents = incidents.New(incRepo, a.Inventory, a.Audit, starter, incidents.Config{AutoTriage: cfg.IncidentAutoTriage})
+	a.Incidents.ServiceToken = cfg.ServiceToken
+	a.Telemetry.Subscriber = a.Incidents
+	a.Coordinator.OnLinked = func(tenantID, incidentID, changeID, actor string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.Incidents.LinkChange(ctx, tenantID, incidentID, changeID, actor); err != nil {
+			slog.Warn("change not linked to incident", "incident_id", incidentID, "change_id", changeID, "error", err)
+		}
+	}
+
+	// Discovery (M03).
+	a.resolver = telemetry.NewInventoryResolver(a.Inventory, a.TenantIDs)
+	a.Discovery = discovery.New(discovery.NewMemoryRepo(), a.Inventory, a.Audit, a.Evidence, creds, discovery.Config{}, a.Connectors.Collectors()...)
+	a.Discovery.OnCMDBChange = a.resolver.Invalidate
+	a.syslogAddr = cfg.SyslogAddr
+
 	ac := api.AuthConfig{DevHeaders: cfg.DevAuth, ServiceToken: cfg.ServiceToken}
 	if cfg.ServiceToken != "" && len(cfg.ServiceToken) < 32 {
 		return nil, fmt.Errorf("ADMINTWIN_SERVICE_TOKEN must be at least 32 characters")
@@ -276,7 +387,7 @@ func New(cfg Config) (*App, error) {
 		Auth: auth, Changes: a.Coordinator, Inventory: a.Inventory, Catalog: cat, Registry: reg, Audit: a.Audit,
 		Evidence: a.Evidence, Kill: a.Kill, Tenants: a.Tenant, Log: cfg.Logger, StartedAt: time.Now(),
 		Version: cfg.Version, Simulator: cfg.Simulator,
-		Modules: []httpapi.Module{a.Tools},
+		Modules: []httpapi.Module{a.Tools, a.Telemetry, a.Incidents, a.Discovery},
 	}
 	a.Metrics = metrics.New()
 	a.Metrics.Help("admintwin_http_requests_total", "HTTP requests by route template and status")
@@ -468,4 +579,37 @@ func (a *App) VerifyAudit() {
 			}
 		}
 	}
+}
+
+// TenantIDs — известные tenant.
+func (a *App) TenantIDs() []string {
+	a.tenantsMu.RLock()
+	defer a.tenantsMu.RUnlock()
+	out := make([]string, 0, len(a.tenants))
+	for t := range a.tenants {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// StartListeners запускает сетевые приёмники и сборщики: syslog (если задан адрес) и опрос метрик коннекторов.
+func (a *App) StartListeners(ctx context.Context, simulator bool) error {
+	if a.syslogAddr != "" {
+		sys := &telemetry.SyslogReceiver{Addr: a.syslogAddr, Resolver: a.resolver, Ingest: a.Telemetry}
+		if err := sys.Start(ctx); err != nil {
+			return fmt.Errorf("syslog: %w", err)
+		}
+	}
+	if !simulator {
+		go a.Connectors.Poller(a.Telemetry.AsSink(), a.TenantIDs).Run(ctx)
+	}
+	return nil
+}
+
+// noCredentials — источник учёток, когда Vault не настроен: любые запросы отклоняются (fail closed).
+type noCredentials struct{}
+
+func (noCredentials) ReadOnly(context.Context, string, string) (discovery.Credential, error) {
+	return discovery.Credential{}, fmt.Errorf("vault is not configured")
 }

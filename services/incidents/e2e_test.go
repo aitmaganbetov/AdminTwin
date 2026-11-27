@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/aitmaganbetov/admintwin/internal/app"
+	"github.com/aitmaganbetov/admintwin/pkg/httpapi"
 	"github.com/aitmaganbetov/admintwin/services/discovery"
 	"github.com/aitmaganbetov/admintwin/services/incidents"
 	"github.com/aitmaganbetov/admintwin/services/inventory"
@@ -114,7 +115,8 @@ func newE2E(t *testing.T) *e2e {
 	disc := discovery.New(discovery.NewMemoryRepo(), a.Inventory, a.Audit, a.Evidence, staticCreds{}, discovery.Config{}, coll)
 	disc.OnCMDBChange = resolver.Invalidate
 
-	a.Server.Modules = append(a.Server.Modules, tel, inc, disc)
+	// Штатные модули приложения заменяются тестовыми экземплярами (свой starter, фейковые сборщики).
+	a.Server.Modules = []httpapi.Module{a.Tools, tel, inc, disc}
 	srv := httptest.NewServer(a.Server.Handler())
 	t.Cleanup(func() { srv.Close(); disc.Wait() })
 	return &e2e{t: t, srv: srv, app: a, orch: orch, disc: disc, sys: sys}

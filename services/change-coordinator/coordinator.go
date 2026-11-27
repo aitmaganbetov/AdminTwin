@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"sort"
 	"sync"
 	"time"
@@ -113,6 +114,8 @@ type Coordinator struct {
 	Now       func() time.Time
 	// Persist — постоянное хранилище (PostgreSQL); nil — только память (dev/test).
 	Persist Persister
+	// OnLinked вызывается (вне блокировки) для change, созданного с incident_id: связь в timeline инцидента.
+	OnLinked func(tenantID, incidentID, changeID, actor string)
 }
 
 // New создаёт координатор и подписывает его на kill switch.
@@ -138,6 +141,9 @@ func (c *Coordinator) now() time.Time {
 func (c *Coordinator) Propose(actor identity.Actor, in ProposeInput) (*ChangeRequest, error) {
 	if in.Reason == "" {
 		return nil, problem.New(problem.BadRequest, "reason is required")
+	}
+	if in.IncidentID != "" && !uuidRe.MatchString(in.IncidentID) {
+		return nil, problem.New(problem.BadRequest, "incident_id must be a uuid")
 	}
 	if in.Type == "" {
 		in.Type = policy.ChangeNormal
@@ -196,6 +202,9 @@ func (c *Coordinator) Propose(actor identity.Actor, in ProposeInput) (*ChangeReq
 		CreatedAt: now, UpdatedAt: now, idemKey: in.IdempotencyKey, idemHash: payloadHash,
 	}
 
+	if cr.IncidentID != "" && c.OnLinked != nil {
+		defer func(tenant, inc, id, who string) { go c.OnLinked(tenant, inc, id, who) }(cr.TenantID, cr.IncidentID, cr.ID, actor.Ref())
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.changes[cr.ID] = cr
@@ -731,6 +740,8 @@ func (cr *ChangeRequest) snapshot() *ChangeRequest {
 	_ = json.Unmarshal(b, &out)
 	return &out
 }
+
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 func hashPayload(in ProposeInput) string {
 	b, _ := json.Marshal(in)

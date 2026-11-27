@@ -16,6 +16,7 @@ test-race:
 test-db:
 	go test -count=1 -v ./tests/security/
 	go test -count=1 -v -run TestPostgresStore ./tests/e2e/
+	go test -count=1 -v -run PG ./services/incidents/   # ADMINTWIN_TEST_INCIDENTS_DB_URL
 	go test -count=1 -v -run TestIntegrationPostgres ./connectors/db/   # ADMINTWIN_TEST_PG_CONNECTOR_URL (read-only роль с паролем)
 
 lint:

@@ -1,7 +1,7 @@
 package incidents_test
 
 // Репозиторий PostgreSQL и миграция 0003 на реальной БД (RLS, инварианты).
-// Запуск: ADMINTWIN_TEST_DATABASE_URL=postgres://... go test ./services/incidents/ -run PG
+// Запуск: ADMINTWIN_TEST_INCIDENTS_DB_URL=postgres://... go test ./services/incidents/ -run PG
 // БД должна быть пустой: тест применяет 0001 и 0003 и откатывает их после себя.
 
 import (
@@ -46,9 +46,9 @@ func applyMigrations(t *testing.T, ctx context.Context, c *pgx.Conn) {
 }
 
 func TestPGRepoAndMigration(t *testing.T) {
-	url := os.Getenv("ADMINTWIN_TEST_DATABASE_URL")
+	url := os.Getenv("ADMINTWIN_TEST_INCIDENTS_DB_URL")
 	if url == "" {
-		t.Skip("ADMINTWIN_TEST_DATABASE_URL is not set")
+		t.Skip("ADMINTWIN_TEST_INCIDENTS_DB_URL is not set")
 	}
 	ctx := context.Background()
 	c, err := pgx.Connect(ctx, url)

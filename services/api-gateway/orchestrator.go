@@ -162,20 +162,29 @@ func (p *OrchestratorProxy) forward(w http.ResponseWriter, r *http.Request, a id
 }
 
 // Kill передаёт аварийную остановку оркестратору (задачи агентов отменяются < 5 с, §11.7).
-func (p *OrchestratorProxy) Kill(tenantID string, platform bool) {
+func (p *OrchestratorProxy) Kill(tenantID string, platform bool) { p.SetKill(tenantID, platform, true) }
+
+// SetKill включает или снимает остановку в оркестраторе.
+func (p *OrchestratorProxy) SetKill(tenantID string, platform, active bool) {
 	if p.BaseURL == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	b, _ := json.Marshal(map[string]any{"tenant_id": tenantID, "platform": platform})
+	body := map[string]any{"platform": platform, "active": active, "reason": "kill switch (core)"}
+	if !platform && tenantID != "" {
+		body["tenant_id"] = tenantID // для уровня платформы tenant не передаётся (оркестратор требует UUID или отсутствие)
+	}
+	b, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(p.BaseURL, "/")+"/v1/kill", bytes.NewReader(b))
 	if err != nil {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-AdminTwin-Service-Token", p.ServiceToken)
-	req.Header.Set("X-AdminTwin-Tenant", tenantID)
+	if !platform && tenantID != "" {
+		req.Header.Set("X-AdminTwin-Tenant", tenantID)
+	}
 	req.Header.Set("X-AdminTwin-Actor", "core")
 	req.Header.Set("X-AdminTwin-Actor-Kind", "service")
 	client := p.Client

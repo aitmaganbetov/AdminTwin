@@ -9,6 +9,7 @@ supporting_agents: [ai-commander, devops-engineer, dba-engineer]
 standards: [STD-17]
 operations:
   - {level: observe,   tool: metrics.query}
+  - {level: observe,   tool: events.list}
   - {level: diagnose,  tool: fortigate.policy.status}
   - {level: diagnose,  tool: logs.search}
   - {level: recommend, tool: topology.blast_radius}

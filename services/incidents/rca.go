@@ -303,3 +303,43 @@ func priorityFor(sev string) string {
 	}
 	return "low"
 }
+
+// PostCase передаёт оценку оператора в оркестратор (POST /v1/cases) — база похожих кейсов tenant.
+func (c *OrchestratorClient) PostCase(ctx context.Context, tenantID, incidentID string, correct bool, cause, actualCause, summary string) error {
+	body := map[string]any{"tenant_id": tenantID, "incident_id": incidentID, "correct": correct}
+	if cause != "" {
+		body["cause"] = cause
+	}
+	if actualCause != "" {
+		body["actual_cause"] = actualCause
+	}
+	if summary != "" {
+		if len(summary) > 4000 {
+			summary = summary[:4000]
+		}
+		body["summary"] = summary
+	}
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.BaseURL, "/")+"/v1/cases", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-AdminTwin-Service-Token", c.ServiceToken)
+	req.Header.Set("X-AdminTwin-Tenant", tenantID)
+	req.Header.Set("X-AdminTwin-Actor", "core")
+	req.Header.Set("X-AdminTwin-Actor-Kind", "service")
+	hc := c.HTTP
+	if hc == nil {
+		hc = &http.Client{Timeout: 10 * time.Second}
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("orchestrator /v1/cases: status %d", resp.StatusCode)
+	}
+	return nil
+}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -57,6 +58,9 @@ type Service struct {
 	cfg   Config
 	// ServiceToken — если задан, POST /rca обязан нести X-AdminTwin-Service-Token (защита в глубину).
 	ServiceToken string
+	// OnFeedback вызывается (асинхронно) после оценки оператора: подтверждённые RCA становятся кейсами
+	// для поиска похожих инцидентов в оркестраторе (§5.3). cause/actualCause — машинные коды или пусто.
+	OnFeedback func(tenantID, incidentID string, correct bool, cause, actualCause, summary string)
 
 	mu  sync.Mutex // сериализует корреляцию и изменения (MVP: один экземпляр ядра)
 	now func() time.Time
@@ -780,6 +784,13 @@ func (s *Service) SetFeedback(ctx context.Context, a identity.Actor, id string, 
 		return nil, nil, err
 	}
 	s.auditLog(a.TenantID, a.Ref(), "incident.feedback", inc.ID, map[string]any{"correct": fb.Correct, "rating": fb.Rating, "candidate_id": cand.ID, "exportable": cand.Exportable})
+	if s.OnFeedback != nil {
+		cause := ""
+		if len(inc.RCA.Hypotheses) > 0 {
+			cause = inc.RCA.Hypotheses[0].Cause
+		}
+		go s.OnFeedback(inc.TenantID, inc.ID, fb.Correct, causeCode(cause), causeCode(fb.ActualCause), inc.RCA.Conclusion)
+	}
 	return inc, &cand, nil
 }
 
@@ -802,4 +813,15 @@ func (s *Service) ExportCandidates(ctx context.Context, a identity.Actor) ([]map
 		}
 	}
 	return out, nil
+}
+
+var causeCodeRe = regexp.MustCompile(`^[a-z][a-z0-9_]{2,63}$`)
+
+// causeCode — только машинный код причины; свободный текст оператора наружу не передаётся.
+func causeCode(s string) string {
+	s = strings.TrimSpace(s)
+	if causeCodeRe.MatchString(s) {
+		return s
+	}
+	return ""
 }

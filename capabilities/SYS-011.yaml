@@ -9,6 +9,8 @@ supporting_agents: [ai-commander, devops-engineer]
 standards: [STD-19]
 operations:
   - {level: observe,  tool: metrics.query}
+  - {level: observe,  tool: asset.get}
+  - {level: observe,  tool: linux.service.status}
   - {level: observe,  tool: events.list}
   - {level: diagnose, tool: logs.search}
 asset_types: [linux_host, docker_host]

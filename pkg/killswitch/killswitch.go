@@ -24,6 +24,7 @@ type Switch struct {
 	gen       map[string]uint64 // tenant -> generation
 	platGen   uint64
 	listeners []func(tenantID string, platform bool)
+	releases  []func(tenantID string, platform bool)
 }
 
 // New создаёт переключатель.
@@ -34,6 +35,13 @@ func (s *Switch) OnActivate(f func(tenantID string, platform bool)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.listeners = append(s.listeners, f)
+}
+
+// OnRelease регистрирует обработчик снятия остановки (например, разблокировать приём задач в оркестраторе).
+func (s *Switch) OnRelease(f func(tenantID string, platform bool)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.releases = append(s.releases, f)
 }
 
 // Set включает/выключает переключатель tenant ("" и platform=true — уровень платформы).
@@ -52,11 +60,16 @@ func (s *Switch) Set(tenantID string, platform, active bool, actor, reason strin
 		}
 	}
 	ls := append([]func(string, bool){}, s.listeners...)
+	rs := append([]func(string, bool){}, s.releases...)
 	s.mu.Unlock()
 	if active {
 		for _, f := range ls {
 			f(tenantID, platform)
 		}
+		return
+	}
+	for _, f := range rs {
+		f(tenantID, platform)
 	}
 }
 

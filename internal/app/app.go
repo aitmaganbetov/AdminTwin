@@ -340,12 +340,14 @@ func New(cfg Config) (*App, error) {
 
 	// Инциденты (M06/M07).
 	var starter incidents.RCAStarter
+	var orch *incidents.OrchestratorClient
 	if cfg.OrchestratorURL != "" {
 		oc, err := incidents.NewOrchestratorClient(cfg.OrchestratorURL, cfg.ServiceToken)
 		if err != nil {
 			return nil, err
 		}
 		starter = oc
+		orch = oc
 	}
 	var incRepo incidents.Repository = incidents.NewMemoryRepo()
 	if a.DB != nil {
@@ -353,6 +355,15 @@ func New(cfg Config) (*App, error) {
 	}
 	a.Incidents = incidents.New(incRepo, a.Inventory, a.Audit, starter, incidents.Config{AutoTriage: cfg.IncidentAutoTriage})
 	a.Incidents.ServiceToken = cfg.ServiceToken
+	if orch != nil {
+		a.Incidents.OnFeedback = func(tenantID, incidentID string, correct bool, cause, actual, summary string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := orch.PostCase(ctx, tenantID, incidentID, correct, cause, actual, summary); err != nil {
+				slog.Warn("RCA case not forwarded to orchestrator", "incident_id", incidentID, "error", err)
+			}
+		}
+	}
 	a.Telemetry.Subscriber = a.Incidents
 	a.Coordinator.OnLinked = func(tenantID, incidentID, changeID, actor string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -418,7 +429,8 @@ func New(cfg Config) (*App, error) {
 	if cfg.OrchestratorURL != "" {
 		a.Orchestrator = &api.OrchestratorProxy{BaseURL: cfg.OrchestratorURL, ServiceToken: cfg.ServiceToken}
 		a.Server.Modules = append(a.Server.Modules, a.Orchestrator)
-		a.Kill.OnActivate(func(tenantID string, platform bool) { go a.Orchestrator.Kill(tenantID, platform) })
+		a.Kill.OnActivate(func(tenantID string, platform bool) { go a.Orchestrator.SetKill(tenantID, platform, true) })
+		a.Kill.OnRelease(func(tenantID string, platform bool) { go a.Orchestrator.SetKill(tenantID, platform, false) })
 	} else {
 		a.Server.Modules = append(a.Server.Modules, &api.OrchestratorProxy{}) // 404 «не настроен», а не 404 маршрута
 	}

@@ -24,7 +24,7 @@ lint:
 	go vet ./...
 
 ai-test:
-	cd ai && python3 -m venv .venv && .venv/bin/pip install -q -e '.[dev]' && .venv/bin/ruff check . && .venv/bin/pytest -q
+	cd ai && python3 -m venv .venv && .venv/bin/pip install -q -e '.[dev]' && .venv/bin/ruff check . && .venv/bin/mypy && .venv/bin/pytest -q && bash scripts/ci_eval_gate.sh
 
 run:
 	ADMINTWIN_DEV_AUTH=true ADMINTWIN_SIMULATOR=true ADMINTWIN_FIXTURES=infra/dev/fixtures.yaml go run ./cmd/admintwin-core

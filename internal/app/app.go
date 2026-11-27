@@ -318,6 +318,8 @@ func New(cfg Config) (*App, error) {
 		if err := a.Connectors.RegisterTools(a.Tools); err != nil {
 			return nil, fmt.Errorf("connector tools: %w", err)
 		}
+	} else if err := a.Sim.RegisterTools(a.Tools); err != nil {
+		return nil, fmt.Errorf("simulator tools: %w", err)
 	}
 
 	// Телеметрия (M05).
@@ -399,6 +401,9 @@ func New(cfg Config) (*App, error) {
 		Evidence: a.Evidence, Kill: a.Kill, Tenants: a.Tenant, Log: cfg.Logger, StartedAt: time.Now(),
 		Version: cfg.Version, Simulator: cfg.Simulator,
 		Modules: []httpapi.Module{a.Tools, a.Telemetry, a.Incidents, a.Discovery},
+	}
+	if cfg.Simulator && cfg.DevAuth {
+		a.Server.Modules = append(a.Server.Modules, a.Sim) // POST /api/v1/dev/simulator — только dev
 	}
 	a.Metrics = metrics.New()
 	a.Metrics.Help("admintwin_http_requests_total", "HTTP requests by route template and status")

@@ -38,9 +38,20 @@ func (s *Service) assetGet(_ context.Context, c Call) (Result, error) {
 	if a.ServiceTier != nil {
 		out["service_tier"] = *a.ServiceTier
 	}
-	if a.Environment == "" || a.Criticality == "" {
-		out["tags"] = map[string]any{"classification": "incomplete"}
+	// Объекты CMDB, которые агенты исследуют read tools (контейнеры, юниты, каталоги журналов).
+	tags := map[string]any{}
+	for key, kind := range map[string]string{"containers": "container", "units": "systemd_unit", "log_directories": "log_directory"} {
+		if v := csv(a.Objects[kind]); v != "" {
+			tags[key] = v
+		}
 	}
+	if v := csv(a.Protected); v != "" {
+		tags["protected"] = v
+	}
+	if a.Environment == "" || a.Criticality == "" {
+		tags["classification"] = "incomplete"
+	}
+	out["tags"] = tags
 	return Result{Data: out}, nil
 }
 
@@ -100,4 +111,20 @@ func toInt(v any) (int, error) {
 		return int(n), err
 	}
 	return 0, fmt.Errorf("not an integer")
+}
+
+// csv — список через запятую, не длиннее 255 символов (контракт tags): лишние элементы отбрасываются.
+func csv(items []string) string {
+	out := ""
+	for _, it := range items {
+		next := it
+		if out != "" {
+			next = out + "," + it
+		}
+		if len(next) > 255 {
+			break
+		}
+		out = next
+	}
+	return out
 }

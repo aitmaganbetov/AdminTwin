@@ -535,6 +535,27 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { keys: { type: array, items: { type: string } } } } } } }
       responses:
         "200": { description: OK }
+  /api/v1/dev/simulator:
+    post:
+      tags: [safety]
+      summary: "DEV ONLY (симулятор + dev-аутентификация): состояние симулируемой инфраструктуры для демо и тестов"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [asset_id]
+              properties:
+                asset_id: { type: string }
+                object: { type: string }
+                running: { type: boolean }
+                disk_percent: { type: number, minimum: 0, maximum: 100 }
+                fault: { type: string, enum: [post_check_fail, channel_lost, hang_confirm, hang_noconfirm, exit_nonzero] }
+      responses:
+        "200": { description: OK }
+        "403": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     oidc:

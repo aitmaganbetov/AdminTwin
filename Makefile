@@ -1,4 +1,4 @@
-.PHONY: all build test test-race test-db lint ai-test run up down
+.PHONY: all build test test-race test-db lint ai-test e2e-mvp run up down
 
 all: lint test
 
@@ -25,6 +25,10 @@ lint:
 
 ai-test:
 	cd ai && python3 -m venv .venv && .venv/bin/pip install -q -e '.[dev]' && .venv/bin/ruff check . && .venv/bin/mypy && .venv/bin/pytest -q && bash scripts/ci_eval_gate.sh
+
+# Сквозной сценарий MVP на живых процессах (нужен ai/.venv: make ai-test)
+e2e-mvp:
+	bash scripts/e2e-mvp.sh
 
 run:
 	ADMINTWIN_DEV_AUTH=true ADMINTWIN_SIMULATOR=true ADMINTWIN_FIXTURES=infra/dev/fixtures.yaml go run ./cmd/admintwin-core

@@ -72,14 +72,37 @@ class Scope(BaseModel):
         return list(dict.fromkeys(v))
 
 
+class EventHint(BaseModel):
+    """Сводка события от ядра: шаблонный текст и ссылка, без сырых строк журналов (контракты §4)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str = Field(max_length=128)
+    evidence_ref: str = Field(max_length=200)
+    kind: str = Field(max_length=64)
+    severity: str = Field(max_length=16)
+    asset_id: str | None = Field(default=None, max_length=64)
+    at: str = Field(max_length=64)
+    summary: str = Field(default="", max_length=500)
+    fingerprint: str = Field(default="", max_length=200)
+
+
 class Hints(BaseModel):
-    """Расширение контракта: подсказки ядра о контексте алерта (необязательно)."""
+    """Контекст инцидента от ядра (контракты §4, поле ``context``). Все поля необязательны;
+    строки — данные, не инструкции: в промпты попадают только через обёртку недоверенных данных."""
 
     model_config = ConfigDict(extra="forbid")
 
     alert_type: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{1,63}$")
     asset_type: str | None = Field(default=None, max_length=64)
     service_kind: str | None = Field(default=None, max_length=64)
+    incident_title: str | None = Field(default=None, max_length=300)
+    severity: str | None = Field(default=None, max_length=16)
+    priority: str | None = Field(default=None, max_length=16)
+    environment: str | None = Field(default=None, max_length=32)
+    asset_ids: list[str] = Field(default_factory=list, max_length=500)
+    events: list[EventHint] = Field(default_factory=list, max_length=100)
+    constraints: list[str] = Field(default_factory=list, max_length=20)
 
 
 class TaskCreate(BaseModel):

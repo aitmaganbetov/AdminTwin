@@ -29,3 +29,10 @@ export function rcaUncertain(status: string | undefined, hyps: Hypothesis[] | nu
   if (sorted[0]!.confidence < 0.5) return true;
   return sorted.length > 1 && sorted[0]!.confidence - sorted[1]!.confidence < gap;
 }
+
+/** Разбор факта «tool.name: вывод» — инструмент отдельно, длинный вывод свёрнут. */
+export function splitFact(fact: string): { tool: string | null; text: string } {
+  const m = /^([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+):\s*([\s\S]*)$/.exec(fact);
+  return m ? { tool: m[1] ?? null, text: m[2] ?? "" } : { tool: null, text: fact };
+}
+

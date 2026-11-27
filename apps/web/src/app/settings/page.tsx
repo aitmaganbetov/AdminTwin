@@ -136,7 +136,7 @@ function KillSwitchCard() {
     <section className="card" aria-labelledby="kill-h" data-testid="kill-card">
       <div className="card-title">
         <h2 id="kill-h">
-          <Icon name="stop" /> {t("kill.title")}
+          {t("kill.title")}
         </h2>
         {tenant ? (
           <Badge tone={tenant.active ? "critical" : "success"}>
@@ -181,13 +181,14 @@ function KillSwitchCard() {
         onClose={() => setOpen(false)}
         actions={
           <>
-            <button type="button" className="btn" onClick={() => setOpen(false)}>
+            <button type="button" className="btn btn-secondary" onClick={() => setOpen(false)}>
               {t("common.cancel")}
             </button>
             <button
               type="button"
               className={target ? "btn btn-danger" : "btn btn-primary"}
               disabled={busy || (target && !confirmed)}
+              aria-busy={busy}
               onClick={submit}
               data-testid="kill-confirm"
             >

@@ -50,7 +50,7 @@ function Changes() {
         actions={
           can.proposeChange(identity) ? (
             <Link href="/changes/new" className="btn btn-primary" data-testid="new-change">
-              <Icon name="plus" /> {t("changes.new")}
+              {t("changes.new")} <Icon name="plus" />
             </Link>
           ) : null
         }
@@ -67,12 +67,12 @@ function Changes() {
             ))}
           </select>
         </div>
-        <div className="row" role="group" aria-label={t("changes.filter.quick")}>
+        <div className="switcher" role="group" aria-label={t("changes.filter.quick")}>
           {QUICK.map((q) => (
             <button
               key={q.status || "all"}
               type="button"
-              className="btn btn-sm"
+              className="switcher-btn"
               aria-pressed={status === q.status}
               onClick={() => setStatus(q.status)}
             >
@@ -81,7 +81,13 @@ function Changes() {
           ))}
         </div>
       </div>
-      <DataState res={res} isEmpty={(d) => d.items.length === 0} emptyText={t("changes.empty")}>
+      <DataState
+        res={res}
+        isEmpty={(d) => d.items.length === 0}
+        emptyText={t("changes.empty")}
+        filtered={!!status}
+        onResetFilters={() => setStatus("")}
+      >
         {(d) => (
           <TableWrap label={t("nav.changes")}>
             <table data-testid="changes-table">
@@ -99,11 +105,11 @@ function Changes() {
               <tbody>
                 {d.items.map((c) => (
                   <tr key={c.id}>
-                    <td className="nowrap">
-                      <Link href={`/changes/${c.id}`}>{fmtDate(c.created_at)}</Link>
-                    </td>
+                    <td className="nowrap">{fmtDate(c.created_at)}</td>
                     <td>
-                      <code>{c.runbook_id}</code>
+                      <Link href={`/changes/${c.id}`} className="mono">
+                        {c.runbook_id}
+                      </Link>
                       <span className="muted small">@{c.runbook_version}</span>
                       {c.dry_run ? (
                         <>

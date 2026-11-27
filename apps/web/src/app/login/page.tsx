@@ -32,6 +32,7 @@ function Login() {
   const [scopes, setScopes] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fieldError, setFieldError] = useState<"actor" | "roles" | null>(null);
 
   const applyPreset = (key: string) => {
     const p = DEV_PRESETS.find((x) => x.key === key);
@@ -43,8 +44,18 @@ function Login() {
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!isValidDevId(actorId)) return setError(t("auth.dev.invalidActor"));
-    if (roles.length === 0) return setError(t("auth.dev.noRoles"));
+    setError(null);
+    if (!isValidDevId(actorId)) {
+      setFieldError("actor");
+      document.getElementById("dev-actor")?.focus();
+      return;
+    }
+    if (roles.length === 0) {
+      setFieldError("roles");
+      document.querySelector<HTMLInputElement>('input[name="roles"]')?.focus();
+      return;
+    }
+    setFieldError(null);
     devLogin({ tenantId, actorId, roles, scopes });
     router.replace(next);
   };
@@ -61,7 +72,7 @@ function Login() {
             <label htmlFor="login-lang" className="visually-hidden">
               {t("settings.language")}
             </label>
-            <select id="login-lang" className="select-sm" value={locale} onChange={(e) => setLocale(e.target.value as Locale)}>
+            <select id="login-lang" value={locale} onChange={(e) => setLocale(e.target.value as Locale)}>
               {LOCALES.map((l) => (
                 <option key={l} value={l}>
                   {t(`locale.${l}` as MessageKey)}
@@ -91,7 +102,7 @@ function Login() {
                 }
               }}
             >
-              <Icon name="lock" /> {t("auth.oidc.button")}
+              {t("auth.oidc.button")} <Icon name="lock" />
             </button>
             {error ? <Notice tone="danger">{error}</Notice> : null}
           </>
@@ -137,11 +148,20 @@ function Login() {
                 <input
                   id="dev-actor"
                   value={actorId}
-                  onChange={(e) => setActorId(e.target.value.trim())}
+                  onChange={(e) => {
+                    setActorId(e.target.value.trim());
+                    if (fieldError === "actor") setFieldError(null);
+                  }}
                   required
                   autoComplete="username"
-                  aria-describedby="dev-actor-hint"
+                  aria-invalid={fieldError === "actor" || undefined}
+                  aria-describedby={fieldError === "actor" ? "dev-actor-err dev-actor-hint" : "dev-actor-hint"}
                 />
+                {fieldError === "actor" ? (
+                  <span id="dev-actor-err" className="error-text" role="alert">
+                    {t("auth.dev.invalidActor")}
+                  </span>
+                ) : null}
                 <span id="dev-actor-hint" className="hint">
                   {t("auth.dev.actorHint")}
                 </span>
@@ -157,8 +177,13 @@ function Login() {
               </div>
             </div>
 
-            <fieldset>
+            <fieldset aria-describedby={fieldError === "roles" ? "dev-roles-err" : undefined}>
               <legend>{t("auth.dev.roles")}</legend>
+              {fieldError === "roles" ? (
+                <p id="dev-roles-err" className="error-text" role="alert">
+                  {t("auth.dev.noRoles")}
+                </p>
+              ) : null}
               <div className="chips">
                 {ALL_ROLES.map((r) => (
                   <label key={r} className="check">
@@ -167,7 +192,10 @@ function Login() {
                       name="roles"
                       value={r}
                       checked={roles.includes(r)}
-                      onChange={(e) => setRoles((cur) => (e.target.checked ? [...cur, r] : cur.filter((x) => x !== r)))}
+                      onChange={(e) => {
+                        setRoles((cur) => (e.target.checked ? [...cur, r] : cur.filter((x) => x !== r)));
+                        if (e.target.checked && fieldError === "roles") setFieldError(null);
+                      }}
                     />
                     {t(`role.${r}` as MessageKey)}
                   </label>

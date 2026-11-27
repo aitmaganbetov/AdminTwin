@@ -139,25 +139,29 @@ function Graph({ topo }: { topo: Topology }) {
                   role="button"
                   tabIndex={0}
                   aria-pressed={isSel}
-                  aria-label={`${a.name}, ${a.type}, ${te("env", a.environment)}${isImp ? `, ${t("topology.impacted")}` : ""}${a.legal_hold ? `, ${t("asset.legalHold")}` : ""}`}
+                  aria-labelledby={a.legal_hold ? `tn-${a.id} tl-${a.id} ts-${a.id}` : `tn-${a.id} ts-${a.id}`}
+                  aria-describedby={`td-${a.id}`}
                   onClick={() => select(a.id)}
                   onKeyDown={(e) => onKey(e, a.id)}
                   data-testid={`topo-node-${a.name}`}
                 >
-                  <rect width={NODE_W} height={NODE_H} rx={8} />
-                  <text x={12} y={22}>
-                    {a.name.length > 18 ? `${a.name.slice(0, 17)}…` : a.name}
+                  <rect width={NODE_W} height={NODE_H} rx={2} />
+                  <desc id={`td-${a.id}`}>
+                    {[te("env", a.environment), isImp ? t("topology.impacted") : "", a.legal_hold ? t("asset.legalHold") : ""].filter(Boolean).join(", ")}
+                  </desc>
+                  <text id={`tn-${a.id}`} x={12} y={22}>
+                    {`${shownName(a.name)} `}
                   </text>
                   {a.legal_hold ? (
-                    <g transform={`translate(${NODE_W - 30},6)`} aria-hidden="true">
+                    <g transform={`translate(${NODE_W - 30},6)`}>
                       <rect width={24} height={16} rx={4} style={{ fill: "var(--danger-bg)", stroke: "var(--danger)" }} />
-                      <text x={12} y={12} textAnchor="middle" style={{ fill: "var(--danger)", fontSize: 10, fontWeight: 700 }}>
-                        LH
+                      <text id={`tl-${a.id}`} x={12} y={12} textAnchor="middle" style={{ fill: "var(--danger)", fontSize: 10, fontWeight: 700 }}>
+                        {"LH "}
                       </text>
                     </g>
                   ) : null}
-                  <text x={12} y={41} className="sub">
-                    {a.type} · tier {a.service_tier ?? "—"} · {a.criticality}
+                  <text id={`ts-${a.id}`} x={12} y={41} className="sub">
+                    {a.type} · tier {a.service_tier ?? "—"} · {te("st.risk", a.criticality)}
                   </text>
                 </g>
               );
@@ -275,4 +279,9 @@ function Graph({ topo }: { topo: Topology }) {
       </section>
     </div>
   );
+}
+
+/** Подпись узла: длинные имена сокращаются (полное имя — в панели blast radius и в title). */
+function shownName(name: string): string {
+  return name.length > 18 ? `${name.slice(0, 17)}…` : name;
 }

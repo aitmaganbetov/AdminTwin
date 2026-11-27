@@ -30,9 +30,9 @@ export default function CapabilitiesPage() {
       <section className="card" aria-labelledby="caps-h">
         <div className="card-title">
           <h2 id="caps-h">{t("capabilities.title")}</h2>
-          <div className="row" role="group" aria-label={t("capabilities.tier")}>
+          <div className="switcher" role="group" aria-label={t("capabilities.tier")}>
             {TIERS.map((x) => (
-              <button key={x || "all"} type="button" className="btn btn-sm" aria-pressed={tier === x} onClick={() => setTier(x)}>
+              <button key={x || "all"} type="button" className="switcher-btn" aria-pressed={tier === x} onClick={() => setTier(x)}>
                 {x || t("common.all")}
               </button>
             ))}

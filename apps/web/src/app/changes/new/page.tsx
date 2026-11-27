@@ -25,6 +25,8 @@ import {
 import { can } from "@/lib/permissions";
 import { useResource } from "@/lib/useResource";
 
+const OPEN_INCIDENT = ["new", "triaged", "investigating", "mitigated", "reopened"];
+
 export default function NewChangePage() {
   return (
     <Suspense>
@@ -44,7 +46,7 @@ function NewChange() {
   if (!can.proposeChange(identity)) {
     return (
       <>
-        <PageHeader title={t("changes.new")} />
+        <PageHeader breadcrumbs={[{ href: "/changes", label: t("nav.changes") }]} title={t("changes.new")} />
         <Notice tone="warning" title={t("perm.denied")}>
           <p>{t("perm.proposeChange")}</p>
         </Notice>
@@ -54,7 +56,7 @@ function NewChange() {
 
   return (
     <>
-      <PageHeader title={t("changes.new")} subtitle={t("changes.new.subtitle")} />
+      <PageHeader breadcrumbs={[{ href: "/changes", label: t("nav.changes") }]} title={t("changes.new")} subtitle={t("changes.new.subtitle")} />
       <DataState res={runbooks} isEmpty={(d) => d.items.length === 0} emptyText={t("runbooks.empty")}>
         {(d) => (
           <ChangeForm
@@ -109,6 +111,10 @@ function ChangeForm({
   const [serverError, setServerError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  // Связь с инцидентом выбирается из открытых инцидентов; без модуля инцидентов — ввод идентификатора.
+  const incidents = useResource(() => api.incidents(), [api]);
+  const incidentManual =
+    !!incidentId && !!incidents.data && !(incidents.data.items || []).some((i) => i.id === incidentId);
 
   // Сброс параметров при смене runbook/актива.
   useEffect(() => {
@@ -126,11 +132,13 @@ function ChangeForm({
   }, [rb]);
 
   useEffect(() => {
-    if (assetId && !eligibleAssets.some((a) => a.id === assetId)) {
+    // Сбрасываем актив вне scope runbook только после загрузки CMDB: иначе актив из ссылки
+    // (?asset=…) терялся, если runbooks загружались раньше активов.
+    if (assets.length > 0 && assetId && !eligibleAssets.some((a) => a.id === assetId)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- актив вне scope runbook
       setAssetId("");
     }
-  }, [eligibleAssets, assetId]);
+  }, [assets.length, eligibleAssets, assetId]);
 
   const body = useMemo(
     () => ({
@@ -157,6 +165,7 @@ function ChangeForm({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (busy) return; // повторная отправка исключена; Idempotency-Key защищает и на сервере
     setServerError(null);
     const ce = validateParamValues(fields, values);
     setClientErrors(ce);
@@ -188,7 +197,7 @@ function ChangeForm({
 
   return (
     <form ref={formRef} onSubmit={submit} noValidate data-testid="change-form">
-      <div className="grid grid-2">
+      <div className="form-grid">
         <div className="card">
           <h2>{t("changes.new.target")}</h2>
           <div className="field">
@@ -272,9 +281,11 @@ function ChangeForm({
             />
             {reasonError ? (
               <span id="cf-reason-err" className="error-text">
-                {t("params.error.required")}
+                {t("changes.new.reasonRequired")}
               </span>
-            ) : null}
+            ) : (
+              <span className="hint">{t("changes.new.reasonHint")}</span>
+            )}
           </div>
 
           <div className="grid grid-2">
@@ -291,7 +302,31 @@ function ChangeForm({
             </div>
             <div className="field">
               <label htmlFor="cf-incident">{t("change.incident")}</label>
-              <input id="cf-incident" value={incidentId} onChange={(e) => setIncidentId(e.target.value)} placeholder="uuid" />
+              {incidents.data && !incidentManual ? (
+                <select id="cf-incident" value={incidentId} onChange={(e) => setIncidentId(e.target.value)} data-testid="cf-incident" aria-describedby="cf-incident-hint">
+                  <option value="">{t("changes.new.noIncident")}</option>
+                  {(incidents.data.items || [])
+                    .filter((i) => OPEN_INCIDENT.includes(i.status) || i.id === incidentId)
+                    .map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.title} · {te("st.severity", i.severity)}
+                      </option>
+                    ))}
+                </select>
+              ) : (
+                <input
+                  id="cf-incident"
+                  value={incidentId}
+                  onChange={(e) => setIncidentId(e.target.value)}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  spellCheck={false}
+                  aria-describedby="cf-incident-hint"
+                  data-testid="cf-incident"
+                />
+              )}
+              <span id="cf-incident-hint" className="hint">
+                {t("changes.new.incidentHint")}
+              </span>
             </div>
           </div>
 
@@ -304,8 +339,7 @@ function ChangeForm({
           </p>
         </div>
 
-        <div className="stack">
-          {rb ? <RunbookSummary rb={rb} compact /> : null}
+        <div className="stack form-aside">
           <div className="card">
             <h2>{t("changes.new.submitTitle")}</h2>
             <p className="small muted">{t("changes.new.submitHint")}</p>
@@ -313,15 +347,16 @@ function ChangeForm({
               Idempotency-Key: <code data-testid="idem-key">{idemKey ?? t("changes.new.idemNew")}</code>
             </p>
             {serverError ? <ProblemView error={serverError} /> : null}
-            <div className="row">
-              <button type="submit" className="btn btn-primary" disabled={busy} data-testid="cf-submit">
-                {busy ? t("common.sending") : t("changes.new.submit")}
-              </button>
-              <Link href="/changes" className="btn">
+            <div className="btn-set">
+              <Link href="/changes" className="btn btn-secondary">
                 {t("common.cancel")}
               </Link>
+              <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy} data-testid="cf-submit">
+                {busy ? t("common.sending") : t("changes.new.submit")}
+              </button>
             </div>
           </div>
+          {rb ? <RunbookSummary rb={rb} compact /> : null}
         </div>
       </div>
     </form>

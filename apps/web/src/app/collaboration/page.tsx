@@ -33,6 +33,8 @@ function Collaboration() {
   const pathname = usePathname();
   const selected = search.get("task");
   const tasks = useResource(() => api.agentTasks(), [api], { intervalMs: 5000 });
+  // 404 на списке задач означает «оркестратор не подключён» (ядро отвечает problem not-found), а не «объект не найден».
+  const tasksUnavailable = !!tasks.error && (tasks.error.kind === "module-unavailable" || tasks.error.status === 404);
   const tree = useMemo(() => buildTaskTree(taskList(tasks.data)), [tasks.data]);
   const select = (id: string) => router.replace(`${pathname}?task=${encodeURIComponent(id)}`, { scroll: false });
 
@@ -42,24 +44,34 @@ function Collaboration() {
       <Notice tone="info" title={t("collab.policy.title")}>
         <p className="small">{t("collab.policy.text")}</p>
       </Notice>
-      {tasks.error?.kind === "module-unavailable" ? (
+      {tasksUnavailable ? (
         <section className="card">
           <ModuleUnavailable name={t("nav.collaboration")} />
         </section>
       ) : (
         <div className="grid collab-grid">
           <div className="stack">
-            <NewTask onCreated={(id) => { tasks.reload(); select(id); }} />
             <section className="card" aria-labelledby="collab-tree">
               <h2 id="collab-tree">{t("collab.taskTree")}</h2>
               <DataState res={tasks} moduleName={t("nav.collaboration")} isEmpty={() => tree.length === 0} emptyText={t("collab.noTasks")}>
                 {() => <TaskTree nodes={tree} selected={selected} onSelect={select} />}
               </DataState>
             </section>
+            <NewTask onCreated={(id) => { tasks.reload(); select(id); }} />
             <AgentsCard />
           </div>
           <div className="stack">
-            {selected ? <TaskDetail id={selected} /> : <section className="card"><p className="muted">{t("collab.pickTask")}</p></section>}
+            {selected ? (
+              <TaskDetail id={selected} />
+            ) : (
+              <section className="card">
+                <div className="empty">
+                  <Icon name="agents" size={32} />
+                  <h3>{t("collab.pickTask.title")}</h3>
+                  <p>{t("collab.pickTask")}</p>
+                </div>
+              </section>
+            )}
             <ChatSessions />
           </div>
         </div>
@@ -71,16 +83,25 @@ function Collaboration() {
 function TaskTree({ nodes, selected, onSelect }: { nodes: TaskNode[]; selected: string | null; onSelect: (id: string) => void }) {
   const { te } = useI18n();
   return (
-    <ul className="tree" role="tree">
+    <ul className="tree">
       {nodes.map((n) => {
         const id = taskId(n.task);
+        const goal = n.task.objective || n.task.agent || id.slice(0, 8);
         return (
-          <li key={id} role="treeitem" aria-selected={id === selected} aria-expanded={n.children.length ? true : undefined}>
-            <button type="button" className="tree-item" aria-current={id === selected ? "true" : undefined} onClick={() => onSelect(id)}>
-              <StatusBadge kind="task" value={n.task.status} />
-              <span>
-                {n.task.kind ? <code>{te("taskKind", n.task.kind)}</code> : null} {n.task.objective || n.task.agent || id.slice(0, 8)}
+          <li key={id}>
+            <button
+              type="button"
+              className="tree-item"
+              aria-current={id === selected ? "true" : undefined}
+              onClick={() => onSelect(id)}
+              title={goal}
+            >
+              <span className="tree-meta">
+                <StatusBadge kind="task" value={n.task.status} />
+                {n.task.kind ? <span className="small muted">{te("taskKind", n.task.kind)}</span> : null}
+                {n.task.agent ? <code className="small">{n.task.agent}</code> : null}
               </span>
+              <span className="tree-goal">{goal}</span>
             </button>
             {n.children.length ? <TaskTree nodes={n.children} selected={selected} onSelect={onSelect} /> : null}
           </li>
@@ -158,7 +179,7 @@ function AgentsCard() {
       <h2 id="collab-agents">{t("agents.registry")}</h2>
       <DataState res={agents} moduleName={t("agents.registry")} isEmpty={(d) => (d.items || []).length === 0}>
         {(d) => (
-          <ul className="steps">
+          <ul className="agent-list">
             {(d.items || []).map((a) => (
               <li key={a.id}>
                 <Icon name="agents" />

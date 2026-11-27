@@ -4,12 +4,12 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Icon } from "@/components/Icon";
-import { Badge, ConfidenceBar, DataState, Notice, PageHeader, ProblemView, StatusBadge, TableWrap } from "@/components/ui";
+import { Badge, ConfidenceBar, DataState, Notice, PageHeader, ProblemView, ShortId, StatusBadge } from "@/components/ui";
 import { isApiError, type ApiError } from "@/lib/api/problem";
 import type { Hypothesis, HypothesisFact, Incident, IncidentStatus, TelemetryEvent } from "@/lib/api/types";
 import { useApi, useAuth } from "@/lib/auth/AuthProvider";
 import { useAssets } from "@/lib/hooks";
-import { INCIDENT_TRANSITIONS, rcaUncertain, transitionRequirements } from "@/lib/incidents";
+import { INCIDENT_TRANSITIONS, rcaUncertain, splitFact, transitionRequirements } from "@/lib/incidents";
 import { useI18n } from "@/lib/i18n/I18nProvider";
 import { can } from "@/lib/permissions";
 import { useResource } from "@/lib/useResource";
@@ -35,18 +35,14 @@ function IncidentView({ inc, reload }: { inc: Incident; reload: () => void }) {
   return (
     <>
       <PageHeader
+        breadcrumbs={[{ href: "/incidents", label: t("nav.incidents") }]}
         title={inc.title}
-        subtitle={
-          <span className="row">
+        meta={
+          <>
             <StatusBadge kind="severity" value={inc.severity} />
             <StatusBadge kind="incident" value={inc.status} />
             <span className="small muted">{fmtDate(inc.created_at)}</span>
-          </span>
-        }
-        actions={
-          <Link className="btn" href="/incidents">
-            {t("common.back")}
-          </Link>
+          </>
         }
       />
       <div className="stack">
@@ -270,21 +266,37 @@ function TransitionPanel({ inc, reload }: { inc: Incident; reload: () => void })
   );
 }
 
+const FACT_PREVIEW = 110;
+
 function FactList({ items }: { items: HypothesisFact[] | null | undefined }) {
+  const { t } = useI18n();
   if (!items || items.length === 0) return <>—</>;
   return (
-    <ul className="small" style={{ margin: 0, paddingLeft: 16 }}>
-      {items.map((f, i) => (
-        <li key={i}>
-          {f.fact}
-          {f.evidence_id ? (
-            <>
-              {" "}
-              <code>{f.evidence_id.slice(0, 12)}</code>
-            </>
-          ) : null}
-        </li>
-      ))}
+    <ul className="facts">
+      {items.map((f, i) => {
+        const { tool, text } = splitFact(f.fact);
+        const long = text.length > FACT_PREVIEW;
+        return (
+          <li key={i}>
+            {tool ? <span className="fact-tool">{tool}</span> : null}
+            {f.evidence_id ? (
+              <span className="cell-sub">
+                {t("change.evidence")}: <ShortId id={f.evidence_id} />
+              </span>
+            ) : null}
+            {long ? (
+              <details className="evidence">
+                <summary>
+                  <span className="fact-text">{text.slice(0, FACT_PREVIEW)}…</span> {t("common.showMore")}
+                </summary>
+                <pre className="code">{text}</pre>
+              </details>
+            ) : (
+              <div className="fact-text">{text}</div>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -331,7 +343,7 @@ function RcaPanel({ inc, reload }: { inc: Incident; reload: () => void }) {
           </Badge>
           {can.createAiTask(identity) ? (
             <button type="button" className="btn btn-primary btn-sm" onClick={analyze} disabled={busy || rca?.status === "running"}>
-              <Icon name="agents" size={14} /> {t("incident.analyze")}
+              {t("incident.analyze")} <Icon name="agents" />
             </button>
           ) : null}
         </div>
@@ -346,35 +358,38 @@ function RcaPanel({ inc, reload }: { inc: Incident; reload: () => void }) {
         <p className="small">{t("rca.notice.text")}</p>
         {uc ? <p className="small">{typeof uc === "string" ? uc : JSON.stringify(uc)}</p> : null}
       </Notice>
+      {rca?.conclusion ? (
+        <div className="rca-conclusion" data-testid="rca-conclusion">
+          <span className="stat-label">{t("rca.conclusion")}</span>
+          <p>{rca.conclusion}</p>
+        </div>
+      ) : null}
       {hyps.length === 0 ? (
         <p className="muted">{t("rca.noHypotheses")}</p>
       ) : (
-        <TableWrap label={t("rca.hypotheses")}>
-          <table data-testid="hypotheses-table">
-            <caption className="visually-hidden">{t("rca.hypotheses")}</caption>
-            <thead>
-              <tr>
-                <th scope="col">{t("rca.cause")}</th>
-                <th scope="col">{t("rca.confidence")}</th>
-                <th scope="col">{t("rca.supporting")}</th>
-                <th scope="col">{t("rca.refuting")}</th>
-                <th scope="col">{t("rca.nextChecks")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {hyps.map((h, i) => (
-                <tr key={i}>
-                  <th scope="row">{h.cause}</th>
-                  <td>
-                    <ConfidenceBar value={h.confidence} label={t("rca.confidence")} />
-                  </td>
-                  <td>
+        <ol className="hypotheses" data-testid="hypotheses-table" aria-label={t("rca.hypotheses")}>
+          {hyps.map((h, i) => (
+            <li key={i}>
+              <details open={i === 0}>
+                <summary className="hyp-head">
+                  <span className="hyp-rank">{i + 1}</span>
+                  <span className="hyp-cause">{h.cause}</span>
+                  <ConfidenceBar value={h.confidence} label={`${t("rca.confidence")}: ${h.cause}`} />
+                  <span className="small muted nowrap">
+                    {t("rca.factsCount", { s: (h.supporting || []).length, r: (h.refuting || []).length })}
+                  </span>
+                </summary>
+                <div className="hyp-body">
+                  <div>
+                    <h3>{t("rca.supporting")}</h3>
                     <FactList items={h.supporting} />
-                  </td>
-                  <td>
+                  </div>
+                  <div>
+                    <h3>{t("rca.refuting")}</h3>
                     <FactList items={h.refuting} />
-                  </td>
-                  <td>
+                  </div>
+                  <div>
+                    <h3>{t("rca.nextChecks")}</h3>
                     {(h.next_checks || []).length === 0 ? (
                       "—"
                     ) : (
@@ -384,18 +399,13 @@ function RcaPanel({ inc, reload }: { inc: Incident; reload: () => void }) {
                         ))}
                       </ul>
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </TableWrap>
+                  </div>
+                </div>
+              </details>
+            </li>
+          ))}
+        </ol>
       )}
-      {rca?.conclusion ? (
-        <p style={{ marginTop: 12 }}>
-          <strong>{t("rca.conclusion")}:</strong> {rca.conclusion}
-        </p>
-      ) : null}
       <p className="small muted">
         {rca?.agents?.length ? `${t("rca.agents")}: ${rca.agents.join(", ")} · ` : ""}
         {rca?.cost_usd !== undefined ? `${t("ai.cost")}: ${fmtNumber(rca.cost_usd, { style: "currency", currency: "USD", maximumFractionDigits: 4 })}` : ""}

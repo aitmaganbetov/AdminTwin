@@ -10,9 +10,20 @@ import { Icon } from "./Icon";
 
 export type Tone = "neutral" | "info" | "success" | "warning" | "danger" | "critical" | "dev" | "outline";
 
-export function Badge({ tone = "neutral", children, title }: { tone?: Tone; children: ReactNode; title?: string }) {
+const TONE_ICON: Partial<Record<Tone, string>> = {
+  success: "st-success",
+  info: "st-info",
+  warning: "st-warning",
+  danger: "st-danger",
+  critical: "st-critical",
+};
+
+/** Тег Carbon. Для статусов (withIcon) смысл передаётся и цветом, и формой иконки, и текстом. */
+export function Badge({ tone = "neutral", children, title, withIcon }: { tone?: Tone; children: ReactNode; title?: string; withIcon?: boolean }) {
+  const ic = withIcon ? TONE_ICON[tone] : undefined;
   return (
     <span className={`badge tone-${tone}`} title={title}>
+      {ic ? <Icon name={ic} size={16} /> : null}
       {children}
     </span>
   );
@@ -86,26 +97,66 @@ const TONES: Record<StatusKind, Record<string, Tone>> = {
 export function StatusBadge({ kind, value }: { kind: StatusKind; value: string | undefined | null }) {
   const { te } = useI18n();
   const v = value || "";
-  return <Badge tone={TONES[kind][v] ?? "neutral"}>{te(`st.${kind}`, v)}</Badge>;
+  return (
+    <Badge tone={TONES[kind][v] ?? "neutral"} withIcon={kind !== "risk"}>
+      {te(`st.${kind}`, v)}
+    </Badge>
+  );
 }
 
-export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
+export interface Crumb {
+  href: string;
+  label: string;
+}
+
+/**
+ * Заголовок страницы (Carbon page header): хлебные крошки — путь назад в ожидаемое место,
+ * назначение экрана, метаданные (статус, идентификатор) и главное действие справа.
+ */
+export function PageHeader({
+  title,
+  subtitle,
+  actions,
+  breadcrumbs,
+  meta,
+}: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  actions?: ReactNode;
+  breadcrumbs?: Crumb[];
+  meta?: ReactNode;
+}) {
+  const { t } = useI18n();
   return (
     <div className="page-header">
-      <div>
+      <div className="page-header-text">
+        {breadcrumbs && breadcrumbs.length > 0 ? (
+          <nav className="breadcrumb" aria-label={t("a11y.breadcrumb")}>
+            <ol>
+              {breadcrumbs.map((c) => (
+                <li key={c.href}>
+                  <Link href={c.href}>{c.label}</Link>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        ) : null}
         <h1>{title}</h1>
         {subtitle ? <p>{subtitle}</p> : null}
+        {meta ? <div className="page-meta">{meta}</div> : null}
       </div>
-      {actions ? <div className="row">{actions}</div> : null}
+      {actions ? <div className="page-actions">{actions}</div> : null}
     </div>
   );
 }
 
 export function Notice({ tone = "info", title, children, icon }: { tone?: Tone; title?: ReactNode; children?: ReactNode; icon?: string }) {
-  const ic = icon ?? (tone === "danger" || tone === "warning" ? "warning" : tone === "success" ? "check" : "info");
+  const ic =
+    icon ??
+    (tone === "danger" ? "st-danger" : tone === "warning" || tone === "dev" ? "st-warning" : tone === "success" ? "st-success" : "st-info");
   return (
     <div className={`notice tone-${tone}`} role={tone === "danger" ? "alert" : undefined}>
-      <Icon name={ic} />
+      <Icon name={ic} size={20} />
       <div className="notice-body">
         {title ? <strong>{title}</strong> : null}
         {children}
@@ -151,7 +202,7 @@ export function ProblemView({ error, onRetry }: { error: ApiError; onRetry?: () 
           : p.title;
   return (
     <div className={`notice tone-${tone}`} role="alert" data-problem-code={code}>
-      <Icon name={code === "kill-switch-active" ? "stop" : code === "legal-hold" ? "lock" : "warning"} />
+      <Icon name={code === "kill-switch-active" ? "stop" : code === "legal-hold" ? "lock" : "st-danger"} size={20} />
       <div className="notice-body">
         <strong>{heading}</strong>
         {p.title && p.title !== heading ? <p className="small">{p.title}{p.status ? ` (HTTP ${p.status})` : ""}</p> : null}
@@ -192,7 +243,7 @@ export function ProblemView({ error, onRetry }: { error: ApiError; onRetry?: () 
         </p>
         {onRetry ? (
           <button type="button" className="btn btn-sm" onClick={onRetry}>
-            <Icon name="refresh" size={14} /> {t("common.retry")}
+            {t("common.retry")} <Icon name="refresh" />
           </button>
         ) : null}
       </div>
@@ -204,26 +255,46 @@ export function ModuleUnavailable({ name }: { name?: string }) {
   const { t } = useI18n();
   return (
     <div className="empty" role="status" data-testid="module-unavailable">
-      <Icon name="plug" size={28} />
+      <Icon name="plug" size={32} />
       <h3>{t("module.unavailable.title")}</h3>
       <p>{name ? t("module.unavailable.named", { name }) : t("module.unavailable.text")}</p>
     </div>
   );
 }
 
-export function Loading() {
+/** Загрузка: скелетон (Carbon) + текст для экранных дикторов. */
+export function Loading({ lines = 3 }: { lines?: number }) {
   const { t } = useI18n();
   return (
-    <p className="muted" role="status" aria-live="polite">
-      {t("common.loading")}
-    </p>
+    <div role="status" aria-live="polite" data-testid="loading">
+      <span className="visually-hidden">{t("common.loading")}</span>
+      {Array.from({ length: lines }, (_, i) => (
+        <span key={i} className="skeleton" style={{ width: `${90 - i * 15}%` }} aria-hidden="true" />
+      ))}
+    </div>
   );
 }
 
-export function Empty({ title, text }: { title?: string; text?: string }) {
+/**
+ * Пустое состояние. Два разных случая: «записей пока нет» и «по запросу ничего не найдено» —
+ * во втором предлагается сбросить фильтры.
+ */
+export function Empty({ title, text, onReset }: { title?: string; text?: string; onReset?: () => void }) {
   const { t } = useI18n();
+  if (onReset) {
+    return (
+      <div className="empty" role="status" data-testid="empty-filtered">
+        <Icon name="search" size={32} />
+        <h3>{t("common.noMatches")}</h3>
+        <p>{t("common.noMatches.hint")}</p>
+        <button type="button" className="btn btn-sm" onClick={onReset} data-testid="reset-filters">
+          {t("common.resetFilters")} <Icon name="reset" />
+        </button>
+      </div>
+    );
+  }
   return (
-    <div className="empty" role="status">
+    <div className="empty" role="status" data-testid="empty">
       <h3>{title ?? t("common.empty")}</h3>
       {text ? <p>{text}</p> : null}
     </div>
@@ -236,12 +307,17 @@ export function DataState<T>({
   isEmpty,
   emptyText,
   moduleName,
+  filtered,
+  onResetFilters,
   children,
 }: {
   res: Resource<T>;
   isEmpty?: (d: T) => boolean;
   emptyText?: string;
   moduleName?: string;
+  /** Пусто из-за фильтров (а не из-за отсутствия записей) — показать «ничего не найдено» и сброс. */
+  filtered?: boolean;
+  onResetFilters?: () => void;
   children: (d: T) => ReactNode;
 }) {
   if (res.error && (res.error.kind === "module-unavailable" || res.data === undefined)) {
@@ -249,7 +325,7 @@ export function DataState<T>({
     return <ProblemView error={res.error} onRetry={res.reload} />;
   }
   if (res.data === undefined) return <Loading />;
-  if (isEmpty && isEmpty(res.data)) return <Empty text={emptyText} />;
+  if (isEmpty && isEmpty(res.data)) return filtered && onResetFilters ? <Empty onReset={onResetFilters} /> : <Empty text={emptyText} />;
   return <>{children(res.data)}</>;
 }
 
@@ -299,16 +375,30 @@ export function Dialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const prevFocus = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
     if (open && !d.open) {
-      const prev = document.activeElement as HTMLElement | null;
+      prevFocus.current = document.activeElement as HTMLElement | null;
       d.showModal();
-      return () => prev?.focus?.();
     }
-    if (!open && d.open) d.close();
+    if (!open && d.open) {
+      d.close();
+      // Возврат фокуса на элемент, открывший диалог (кнопку), — после закрытия.
+      const prev = prevFocus.current;
+      prevFocus.current = null;
+      if (prev && document.contains(prev)) prev.focus();
+    }
   }, [open]);
+  // Диалог, который размонтируют вместо open=false (условный рендер), тоже возвращает фокус.
+  useEffect(
+    () => () => {
+      const prev = prevFocus.current;
+      if (prev) setTimeout(() => document.contains(prev) && prev.focus(), 0);
+    },
+    [],
+  );
   return (
     <dialog
       ref={ref}

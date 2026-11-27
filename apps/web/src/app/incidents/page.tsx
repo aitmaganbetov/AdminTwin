@@ -21,6 +21,11 @@ export default function IncidentsPage() {
   const [severity, setSeverity] = useState<Severity | "">("");
   const [createOpen, setCreateOpen] = useState(false);
   const res = useResource(() => api.incidents({ status, severity }), [api, status, severity], { intervalMs: 10000 });
+  const filtered = !!(status || severity);
+  const reset = () => {
+    setStatus("");
+    setSeverity("");
+  };
 
   return (
     <>
@@ -30,7 +35,7 @@ export default function IncidentsPage() {
         actions={
           can.manageIncidents(identity) && res.error?.kind !== "module-unavailable" ? (
             <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-              <Icon name="plus" /> {t("incidents.new")}
+              {t("incidents.new")} <Icon name="plus" />
             </button>
           ) : null
         }
@@ -58,14 +63,35 @@ export default function IncidentsPage() {
             ))}
           </select>
         </div>
+        <div className="toolbar-meta">
+          {res.data ? (
+            <span className="small" role="status" data-testid="incidents-count">
+              {t("common.found", { n: (res.data.items || []).length })}
+            </span>
+          ) : null}
+          {filtered ? (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={reset} data-testid="incidents-reset">
+              {t("common.resetFilters")} <Icon name="reset" />
+            </button>
+          ) : null}
+        </div>
       </div>
-      <DataState res={res} moduleName={t("nav.incidents")} isEmpty={(d) => (d.items || []).length === 0} emptyText={t("incidents.empty")}>
+      <DataState
+        res={res}
+        moduleName={t("nav.incidents")}
+        isEmpty={(d) => (d.items || []).length === 0}
+        emptyText={t("incidents.empty")}
+        filtered={filtered}
+        onResetFilters={reset}
+      >
         {(d) => (
           <TableWrap label={t("nav.incidents")}>
             <table data-testid="incidents-table">
               <thead>
                 <tr>
-                  <th scope="col">{t("incident.title")}</th>
+                  <th scope="col" className="col-main">
+                    {t("incident.title")}
+                  </th>
                   <th scope="col">{t("incident.severity")}</th>
                   <th scope="col">{t("incident.status")}</th>
                   <th scope="col">{t("incident.assets")}</th>
@@ -77,16 +103,16 @@ export default function IncidentsPage() {
               <tbody>
                 {(d.items || []).map((i) => (
                   <tr key={i.id}>
-                    <th scope="row">
+                    <td>
                       <Link href={`/incidents/${i.id}`}>{i.title}</Link>
-                    </th>
+                    </td>
                     <td>
                       <StatusBadge kind="severity" value={i.severity} />
                     </td>
                     <td>
                       <StatusBadge kind="incident" value={i.status} />
                     </td>
-                    <td className="small">{(i.asset_ids || []).map((a) => assets.byId.get(a)?.name || a).join(", ") || "—"}</td>
+                    <td>{(i.asset_ids || []).map((a) => assets.byId.get(a)?.name || a).join(", ") || "—"}</td>
                     <td>{i.owner || "—"}</td>
                     <td>{te("rca", i.rca?.status || "not_started")}</td>
                     <td className="nowrap">{fmtDate(i.created_at)}</td>
@@ -112,10 +138,17 @@ function CreateIncident({ onClose, onCreated }: { onClose: () => void; onCreated
   const [description, setDescription] = useState("");
   const [err, setErr] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
+  const [titleError, setTitleError] = useState(false);
   const submit = async (e?: FormEvent) => {
     e?.preventDefault();
-    if (!title.trim()) return;
+    if (busy) return; // защита от повторной отправки
+    if (!title.trim()) {
+      setTitleError(true);
+      document.getElementById("ni-title")?.focus();
+      return;
+    }
     setBusy(true);
+    setErr(null);
     try {
       await api.createIncident({ title: title.trim(), severity, asset_ids: assetIds, description: description.trim() || undefined });
       onCreated();
@@ -134,21 +167,36 @@ function CreateIncident({ onClose, onCreated }: { onClose: () => void; onCreated
       onClose={onClose}
       actions={
         <>
-          <button type="button" className="btn" onClick={onClose}>
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
             {t("common.cancel")}
           </button>
-          <button type="button" className="btn btn-primary" disabled={busy || !title.trim()} onClick={() => submit()}>
-            {t("common.create")}
+          <button type="submit" form="new-incident" className="btn btn-primary" disabled={busy} aria-busy={busy} data-testid="ni-submit">
+            {busy ? t("common.sending") : t("incidents.create")}
           </button>
         </>
       }
     >
-      <form onSubmit={submit}>
+      <form id="new-incident" onSubmit={submit} noValidate>
         <div className="field">
           <label htmlFor="ni-title">
             {t("incident.title")} <span className="req" aria-hidden="true">*</span>
           </label>
-          <input id="ni-title" value={title} onChange={(e) => setTitle(e.target.value)} required />
+          <input
+            id="ni-title"
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              if (e.target.value.trim()) setTitleError(false);
+            }}
+            required
+            aria-invalid={titleError || undefined}
+            aria-describedby={titleError ? "ni-title-err" : undefined}
+          />
+          {titleError ? (
+            <p id="ni-title-err" className="error-text" role="alert">
+              {t("incidents.titleRequired")}
+            </p>
+          ) : null}
         </div>
         <div className="field">
           <label htmlFor="ni-sev">{t("incident.severity")}</label>

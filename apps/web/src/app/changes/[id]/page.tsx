@@ -11,6 +11,7 @@ import {
   Dialog,
   Notice,
   PageHeader,
+  ShortId,
   ProblemView,
   StatusBadge,
   TableWrap,
@@ -61,20 +62,19 @@ function ChangeDetail() {
       {(ch) => (
         <>
           <PageHeader
-            title={`${t("change.title")} · ${ch.runbook_id}`}
-            subtitle={
-              <span className="row">
+            breadcrumbs={[{ href: "/changes", label: t("nav.changes") }]}
+            title={ch.runbook_id}
+            meta={
+              <>
                 <StatusBadge kind="change" value={ch.status} />
                 <code data-testid="change-status" className="visually-hidden">
                   {ch.status}
                 </code>
-                <span className="mono small">{ch.id}</span>
-              </span>
-            }
-            actions={
-              <Link className="btn" href="/changes">
-                {t("common.back")}
-              </Link>
+                <StatusBadge kind="risk" value={ch.risk} />
+                <span className="small muted">
+                  {t("change.title")} <ShortId id={ch.id} />
+                </span>
+              </>
             }
           />
           {created ? (
@@ -111,7 +111,8 @@ function ChangeBody({ ch, reload }: { ch: Change; reload: () => void }) {
         </Notice>
       ) : null}
 
-      <div className="grid grid-2">
+      <div className="detail-grid">
+        <div className="stack">
         <section className="card" aria-labelledby="ch-summary">
           <h2 id="ch-summary">{t("change.summary")}</h2>
           <dl className="kv">
@@ -120,8 +121,9 @@ function ChangeBody({ ch, reload }: { ch: Change; reload: () => void }) {
               <code>
                 {ch.runbook_id}@{ch.runbook_version}
               </code>
-              <br />
-              <span className="mono small muted">{ch.runbook_digest}</span>
+              <span className="cell-sub mono" title={ch.runbook_digest} style={{ wordBreak: "break-all" }}>
+                {ch.runbook_digest}
+              </span>
             </dd>
             <dt>{t("change.risk")}</dt>
             <dd>
@@ -171,7 +173,9 @@ function ChangeBody({ ch, reload }: { ch: Change; reload: () => void }) {
               <>
                 <dt>{t("change.incident")}</dt>
                 <dd>
-                  <Link href={`/incidents/${ch.incident_id}`}>{ch.incident_id}</Link>
+                  <Link href={`/incidents/${ch.incident_id}`}>
+                    <ShortId id={ch.incident_id} />
+                  </Link>
                 </dd>
               </>
             ) : null}
@@ -186,13 +190,12 @@ function ChangeBody({ ch, reload }: { ch: Change; reload: () => void }) {
             <dd>{fmtDate(ch.updated_at)}</dd>
           </dl>
         </section>
-
-        <ApprovalPanel ch={ch} reload={reload} />
-      </div>
-
-      <div className="grid grid-2">
         <PolicyPanel ch={ch} />
         <ImpactPanel ch={ch} />
+        </div>
+        <div className="detail-aside">
+          <ApprovalPanel ch={ch} reload={reload} />
+        </div>
       </div>
 
       <section className="card" aria-labelledby="ch-exec">
@@ -268,6 +271,7 @@ function ApprovalPanel({ ch, reload }: { ch: Change; reload: () => void }) {
   const required = ch.policy?.required_approvals ?? 0;
 
   const decide = async (v: "approve" | "reject") => {
+    if (busy) return;
     setBusy(v);
     setErr(null);
     setOk(null);
@@ -285,6 +289,7 @@ function ApprovalPanel({ ch, reload }: { ch: Change; reload: () => void }) {
   };
 
   const cancel = async () => {
+    if (busy) return;
     setBusy("cancel");
     setErr(null);
     try {
@@ -351,12 +356,26 @@ function ApprovalPanel({ ch, reload }: { ch: Change; reload: () => void }) {
               <label htmlFor="approval-comment">{t("approval.comment")}</label>
               <textarea id="approval-comment" value={comment} onChange={(e) => setComment(e.target.value)} data-testid="approval-comment" />
             </div>
-            <div className="row">
-              <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => decide("approve")} data-testid="approve">
-                <Icon name="check" /> {t("approval.approve")}
+            <div className="btn-set">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!!busy}
+                aria-busy={busy === "approve"}
+                onClick={() => decide("approve")}
+                data-testid="approve"
+              >
+                {busy === "approve" ? t("common.sending") : t("approval.approve")} <Icon name="check" />
               </button>
-              <button type="button" className="btn btn-danger" disabled={!!busy} onClick={() => decide("reject")} data-testid="reject">
-                <Icon name="x" /> {t("approval.reject")}
+              <button
+                type="button"
+                className="btn btn-danger"
+                disabled={!!busy}
+                aria-busy={busy === "reject"}
+                onClick={() => decide("reject")}
+                data-testid="reject"
+              >
+                {busy === "reject" ? t("common.sending") : t("approval.reject")} <Icon name="x" />
               </button>
             </div>
           </div>
@@ -369,7 +388,7 @@ function ApprovalPanel({ ch, reload }: { ch: Change; reload: () => void }) {
 
       {ok ? (
         <div role="status" className="notice tone-success" style={{ marginTop: 12 }}>
-          <Icon name="check" />
+          <Icon name="st-success" size={20} />
           <div className="notice-body">{ok}</div>
         </div>
       ) : null}
@@ -381,8 +400,8 @@ function ApprovalPanel({ ch, reload }: { ch: Change; reload: () => void }) {
 
       {can.cancelChange(identity) && CANCELLABLE.includes(ch.status) ? (
         <div style={{ marginTop: 12 }}>
-          <button type="button" className="btn" onClick={() => setCancelOpen(true)} data-testid="cancel-change">
-            <Icon name="stop" /> {ch.status === "executing" ? t("change.cancel.executing") : t("change.cancel")}
+          <button type="button" className="btn btn-ghost" onClick={() => setCancelOpen(true)} data-testid="cancel-change">
+            {ch.status === "executing" ? t("change.cancel.executing") : t("change.cancel")}
           </button>
         </div>
       ) : null}
@@ -392,11 +411,18 @@ function ApprovalPanel({ ch, reload }: { ch: Change; reload: () => void }) {
         onClose={() => setCancelOpen(false)}
         actions={
           <>
-            <button type="button" className="btn" onClick={() => setCancelOpen(false)}>
-              {t("common.close")}
+            <button type="button" className="btn btn-secondary" onClick={() => setCancelOpen(false)}>
+              {t("change.cancel.keep")}
             </button>
-            <button type="button" className="btn btn-danger" disabled={busy === "cancel"} onClick={cancel} data-testid="cancel-confirm">
-              {t("change.cancel.confirm")}
+            <button
+              type="button"
+              className="btn btn-danger"
+              disabled={busy === "cancel"}
+              aria-busy={busy === "cancel"}
+              onClick={cancel}
+              data-testid="cancel-confirm"
+            >
+              {busy === "cancel" ? t("common.sending") : t("change.cancel.confirm")}
             </button>
           </>
         }
@@ -474,7 +500,7 @@ function ImpactPanel({ ch }: { ch: Change }) {
             <dt>{t("impact.tiers")}</dt>
             <dd>{(imp.affected_service_tiers || []).map((x) => `tier ${x}`).join(", ") || "—"}</dd>
             <dt>{t("impact.maxCriticality")}</dt>
-            <dd>{imp.max_criticality || "—"}</dd>
+            <dd>{imp.max_criticality ? <StatusBadge kind="risk" value={imp.max_criticality} /> : "—"}</dd>
             <dt>{t("impact.inWindow")}</dt>
             <dd>
               <YesNo v={imp.in_maintenance_window} />
@@ -503,7 +529,7 @@ function ImpactPanel({ ch }: { ch: Change }) {
                       </td>
                       <td>{b.depth}</td>
                       <td>{b.service_tier ?? "—"}</td>
-                      <td>{b.criticality}</td>
+                      <td>{b.criticality ? <StatusBadge kind="risk" value={b.criticality} /> : "—"}</td>
                       <td>
                         <ConfidenceBar value={b.confidence} label={t("topology.confidence")} />
                       </td>

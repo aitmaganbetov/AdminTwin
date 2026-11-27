@@ -97,10 +97,10 @@ function Audit() {
         <form className="toolbar" onSubmit={apply} role="search">
           <div className="field" style={{ flex: "1 1 280px" }}>
             <label htmlFor="audit-object">{t("audit.filterObject")}</label>
-            <input id="audit-object" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="uuid" />
+            <input id="audit-object" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" spellCheck={false} />
           </div>
           <button type="submit" className="btn">
-            {t("common.apply")}
+            {t("audit.applyFilter")}
           </button>
           {object ? (
             <button
@@ -111,11 +111,20 @@ function Audit() {
                 router.replace(pathname);
               }}
             >
-              {t("common.reset")}
+              {t("common.resetFilters")}
             </button>
           ) : null}
         </form>
-        <DataState res={logs} isEmpty={(d) => d.items.length === 0} emptyText={t("audit.empty")}>
+        <DataState
+          res={logs}
+          isEmpty={(d) => d.items.length === 0}
+          emptyText={t("audit.empty")}
+          filtered={!!object}
+          onResetFilters={() => {
+            setDraft("");
+            router.replace(pathname);
+          }}
+        >
           {(d) => (
             <TableWrap label={t("audit.log")}>
               <table data-testid="audit-table">

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { KillSwitchStatus } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { DEMO_TENANTS } from "@/lib/auth/dev";
@@ -102,10 +102,17 @@ function Shell({ children, mode }: { children: ReactNode; mode: "dev" | "oidc" }
     setNavOpen(false);
   }, [pathname]);
 
+  const menuRef = useRef<HTMLButtonElement>(null);
+  const navRef = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!navOpen) return;
+    // Открытое меню на узком экране: фокус на первый пункт, Escape закрывает и возвращает фокус на кнопку.
+    navRef.current?.querySelector<HTMLElement>("a[aria-current=page], a")?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setNavOpen(false);
+      if (e.key === "Escape") {
+        setNavOpen(false);
+        menuRef.current?.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -120,30 +127,34 @@ function Shell({ children, mode }: { children: ReactNode; mode: "dev" | "oidc" }
         {t("a11y.skipToContent")}
       </a>
       <div className="shell">
-        <header className="header">
+        <header className="header" aria-label="AdminTwin">
           <button
+            ref={menuRef}
             type="button"
-            className="btn btn-ghost icon-btn menu-button"
+            className="header-action menu-button"
             aria-expanded={navOpen}
             aria-controls="primary-nav"
             aria-label={navOpen ? t("a11y.closeMenu") : t("a11y.openMenu")}
+            title={navOpen ? t("a11y.closeMenu") : t("a11y.openMenu")}
             onClick={() => setNavOpen((v) => !v)}
           >
-            <Icon name={navOpen ? "x" : "menu"} />
+            <Icon name={navOpen ? "x" : "menu"} size={20} />
           </button>
-          <Link href="/" className="brand" aria-label={t("a11y.home")}>
+          <Link href="/" className="brand">
             <LogoMark />
             <span>AdminTwin</span>
-            <span className="brand-tag">Observe · Analyze · Automate · Secure</span>
+            <span className="brand-tag hide-sm">Observe · Analyze · Automate · Secure</span>
           </Link>
           <div className="header-spacer" />
           <div className="header-tools">
             {mode === "dev" ? (
-              <span className="badge tone-dev hide-sm" title={t("auth.dev.bannerText")}>
-                DEV
+              <span className="hide-sm">
+                <span className="badge tone-dev header-tag" title={t("auth.dev.bannerText")}>
+                  DEV
+                </span>
               </span>
             ) : null}
-            <div className="identity-chip" aria-label={t("auth.signedInAs")}>
+            <div className="identity-chip" title={t("auth.signedInAs")}>
               <strong>{identity?.displayName || identity?.actorId}</strong>
               <span>{tenantLabel ? `${tenantLabel} · ` : ""}{identity?.roles.map((r) => t(`role.${r}` as MessageKey)).join(", ")}</span>
             </div>
@@ -152,7 +163,7 @@ function Shell({ children, mode }: { children: ReactNode; mode: "dev" | "oidc" }
             </label>
             <select
               id="lang-select"
-              className="select-sm"
+              className="header-select"
               value={locale}
               onChange={(e) => setLocale(e.target.value as Locale)}
               data-testid="lang-select"
@@ -165,17 +176,17 @@ function Shell({ children, mode }: { children: ReactNode; mode: "dev" | "oidc" }
             </select>
             <button
               type="button"
-              className="btn btn-ghost icon-btn"
+              className="header-action"
               onClick={toggle}
               aria-label={resolved === "dark" ? t("theme.switchToLight") : t("theme.switchToDark")}
               title={resolved === "dark" ? t("theme.switchToLight") : t("theme.switchToDark")}
               data-testid="theme-toggle"
             >
-              <Icon name={resolved === "dark" ? "sun" : "moon"} />
+              <Icon name={resolved === "dark" ? "sun" : "moon"} size={20} />
             </button>
             <button
               type="button"
-              className="btn btn-ghost icon-btn"
+              className="header-action"
               aria-label={t("auth.logout")}
               title={t("auth.logout")}
               onClick={() => {
@@ -183,7 +194,7 @@ function Shell({ children, mode }: { children: ReactNode; mode: "dev" | "oidc" }
                 router.replace("/login");
               }}
             >
-              <Icon name="logout" />
+              <Icon name="logout" size={20} />
             </button>
           </div>
         </header>
@@ -191,6 +202,7 @@ function Shell({ children, mode }: { children: ReactNode; mode: "dev" | "oidc" }
         <div className="banner-area">
           {mode === "dev" ? (
             <div className="dev-banner" role="note">
+              <Icon name="warning" />
               {t("auth.dev.bannerText")}
             </div>
           ) : null}
@@ -213,7 +225,7 @@ function Shell({ children, mode }: { children: ReactNode; mode: "dev" | "oidc" }
           tabIndex={-1}
           onClick={() => setNavOpen(false)}
         />
-        <nav id="primary-nav" className="sidebar" data-open={navOpen} aria-label={t("a11y.primaryNav")}>
+        <nav ref={navRef} id="primary-nav" className="sidebar" data-open={navOpen} aria-label={t("a11y.primaryNav")}>
           {NAV.map((g) => (
             <div key={g.group}>
               <p className="nav-group-title">{t(g.group)}</p>
@@ -221,7 +233,7 @@ function Shell({ children, mode }: { children: ReactNode; mode: "dev" | "oidc" }
                 {g.items.map((it) => (
                   <li key={it.href}>
                     <Link className="nav-link" href={it.href} aria-current={isActive(pathname, it.href) ? "page" : undefined}>
-                      <Icon name={it.icon} className="nav-icon" />
+                      <Icon name={it.icon} className="nav-icon" size={16} />
                       <span>{t(it.key)}</span>
                     </Link>
                   </li>

@@ -15,6 +15,8 @@ cd apps/web && npm ci && npm run dev        # http://localhost:3000
 ```
 
 Проверки: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`,
+`npm run ui:audit -- <каталог>` (все экраны × 1440/1024/768/390: скриншоты, переполнение, axe WCAG 2.2 AA),
+`npm run ui:scenarios` (клавиатура, сохранение + перезагрузка, фильтры, роли, двойная отправка),
 `npm run smoke` (Playwright против запущенных ядра и `next start`; скриншоты — `docs/screenshots/`).
 
 ## Переменные окружения
@@ -33,6 +35,14 @@ cd apps/web && npm ci && npm run dev        # http://localhost:3000
 Токен OIDC хранится только в памяти вкладки; в `sessionStorage` — лишь одноразовые `state`/`code_verifier`
 на время редиректа и DEV-идентичность (не секрет). Роли в UI управляют только видимостью элементов —
 решения принимает сервер (Policy Engine), его ошибки RFC 9457 показываются как есть.
+
+## Дизайн-система
+
+Визуальный язык IBM Carbon v11: токены тем g10/g100 (`--cds-*`), отступы `--sp-*` и размеры — в `src/app/globals.css`;
+шрифты IBM Plex Sans/Mono (`@fontsource`, включая cyrillic-ext для казахского), иконки `@carbon/icons-react`.
+Общие компоненты — `src/components/ui.tsx` (PageHeader с хлебными крошками, теги статусов с иконкой,
+пустые состояния «нет записей» / «ничего не найдено + сброс», скелетон загрузки, модальный диалог с возвратом фокуса).
+Аудит и сравнение до/после — [`docs/ui-audit/`](docs/ui-audit/README.md).
 
 ## Структура
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Icon } from "@/components/Icon";
-import { Badge, DataState, Notice, PageHeader, TableWrap } from "@/components/ui";
+import { Badge, DataState, Notice, PageHeader, ShortId, TableWrap } from "@/components/ui";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { missingClassification, useAssets } from "@/lib/hooks";
 import type { MessageKey } from "@/lib/i18n/core";
@@ -35,6 +35,11 @@ export default function AssetsPage() {
   }, [assets.list, q, env]);
   const envs = useMemo(() => [...new Set(assets.list.map((a) => a.environment).filter(Boolean))].sort(), [assets.list]);
   const incomplete = assets.list.filter((a) => missingClassification(a).length > 0).length;
+  const isFiltered = !!(q.trim() || env);
+  const reset = () => {
+    setQ("");
+    setEnv("");
+  };
 
   return (
     <>
@@ -45,7 +50,7 @@ export default function AssetsPage() {
         </Notice>
       ) : null}
       <div className="toolbar">
-        <div className="field">
+        <div className="field grow">
           <label htmlFor="asset-q">{t("common.search")}</label>
           <input id="asset-q" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("assets.searchPlaceholder")} />
         </div>
@@ -60,18 +65,38 @@ export default function AssetsPage() {
             ))}
           </select>
         </div>
+        <div className="toolbar-meta">
+          {assets.data ? (
+            <span className="small" role="status" data-testid="assets-count">
+              {t("common.shown", { n: filtered.length, total: assets.list.length })}
+            </span>
+          ) : null}
+          {isFiltered ? (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={reset} data-testid="assets-reset">
+              {t("common.resetFilters")} <Icon name="reset" />
+            </button>
+          ) : null}
+        </div>
       </div>
-      <DataState res={assets} isEmpty={() => filtered.length === 0} emptyText={t("assets.empty")}>
+      <DataState
+        res={assets}
+        isEmpty={() => filtered.length === 0}
+        emptyText={t("assets.empty")}
+        filtered={isFiltered && assets.list.length > 0}
+        onResetFilters={reset}
+      >
         {() => (
           <TableWrap label={t("nav.assets")}>
-            <table data-testid="assets-table">
+            <table data-testid="assets-table" className="table-sticky">
               <thead>
                 <tr>
                   <th scope="col">{t("asset.name")}</th>
                   <th scope="col">{t("asset.type")}</th>
                   <th scope="col">{t("asset.environment")}</th>
                   <th scope="col">{t("asset.ring")}</th>
-                  <th scope="col">{t("asset.tier")}</th>
+                  <th scope="col" className="num">
+                    {t("asset.tier")}
+                  </th>
                   <th scope="col">{t("asset.criticality")}</th>
                   <th scope="col">{t("asset.dataClass")}</th>
                   <th scope="col">{t("asset.owner")}</th>
@@ -86,17 +111,18 @@ export default function AssetsPage() {
                   const miss = missingClassification(a);
                   return (
                     <tr key={a.id}>
-                      <th scope="row">
-                        <span>{a.name}</span>
-                        <br />
-                        <span className="mono small muted">{a.id}</span>
+                      <th scope="row" className="nowrap">
+                        {a.name}
+                        <span className="cell-sub">
+                          <ShortId id={a.id} />
+                        </span>
                       </th>
-                      <td>
+                      <td className="nowrap">
                         <code>{a.type}</code>
                       </td>
                       <td>{te("env", a.environment)}</td>
                       <td>{a.ring || "—"}</td>
-                      <td>{a.service_tier ?? "—"}</td>
+                      <td className="num">{a.service_tier ?? "—"}</td>
                       <td>{te("st.risk", a.criticality)}</td>
                       <td>
                         <Badge tone={DATA_CLASS_TONE[a.data_class] ?? "neutral"}>{te("dataClass", a.data_class)}</Badge>
@@ -106,25 +132,45 @@ export default function AssetsPage() {
                         <div className="row" style={{ gap: 4 }}>
                           {a.legal_hold ? (
                             <Badge tone="danger" title={t("asset.legalHold.hint")}>
-                              <Icon name="lock" size={12} /> {t("asset.legalHold")}
+                              <Icon name="lock" /> {t("asset.legalHold")}
                             </Badge>
                           ) : null}
-                          {a.active_investigation ? <Badge tone="warning">{t("asset.investigation")}</Badge> : null}
-                          {a.verified ? <Badge tone="success">{t("asset.verified")}</Badge> : <Badge tone="warning">{t("asset.unverified")}</Badge>}
+                          {a.active_investigation ? (
+                            <Badge tone="warning" withIcon>
+                              {t("asset.investigation")}
+                            </Badge>
+                          ) : null}
+                          {a.verified ? (
+                            <Badge tone="success" withIcon>
+                              {t("asset.verified")}
+                            </Badge>
+                          ) : (
+                            <Badge tone="warning" withIcon>
+                              {t("asset.unverified")}
+                            </Badge>
+                          )}
                           {miss.length > 0 ? (
-                            <Badge tone="warning" title={miss.map((m) => t(`asset.field.${m}` as MessageKey)).join(", ")}>
-                              <Icon name="warning" size={12} /> {t("assets.incomplete.badge")}
+                            <Badge tone="warning" withIcon title={miss.map((m) => t(`asset.field.${m}` as MessageKey)).join(", ")}>
+                              {t("assets.incomplete.badge")}
                             </Badge>
                           ) : null}
                         </div>
                       </td>
                       <td>
-                        <div className="row" style={{ gap: 4 }}>
-                          <Link className="btn btn-sm" href={`/topology?asset=${a.id}`}>
+                        <div className="row nowrap" style={{ gap: 4, flexWrap: "nowrap" }}>
+                          <Link
+                            className="btn btn-ghost btn-sm"
+                            href={`/topology?asset=${a.id}`}
+                            aria-label={`${t("assets.blastRadius")}: ${a.name}`}
+                          >
                             {t("assets.blastRadius")}
                           </Link>
                           {can.proposeChange(identity) ? (
-                            <Link className="btn btn-sm" href={`/changes/new?asset=${a.id}`}>
+                            <Link
+                              className="btn btn-ghost btn-sm"
+                              href={`/changes/new?asset=${a.id}`}
+                              aria-label={`${t("assets.change")}: ${a.name}`}
+                            >
                               {t("assets.change")}
                             </Link>
                           ) : null}

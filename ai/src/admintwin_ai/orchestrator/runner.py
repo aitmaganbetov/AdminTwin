@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 import json
 import threading
 from collections.abc import Callable
@@ -311,7 +310,3 @@ def _stop_reason(resp: GatewayResponse) -> tuple[AgentStop, str]:
     if error.startswith("all candidates failed"):
         return "model_unavailable", error
     return "model_error", error or "provider request error"
-
-
-def run_partial(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Callable[[], Any]:
-    return functools.partial(fn, *args, **kwargs)

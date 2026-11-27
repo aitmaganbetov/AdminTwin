@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from collections import deque
 from dataclasses import dataclass, field
 
 from admintwin_ai.bus.base import (
@@ -40,7 +41,8 @@ class InProcessBus(AgentBus):
         self._pending: dict[str, list[str]] = {}  # сообщения до подписки агента
         self._retry_tasks: set[asyncio.Task[None]] = set()
         self.dead_letters: list[DeadLetter] = []
-        self.published: list[dict[str, object]] = []
+        #: последние опубликованные конверты (диагностика и тесты)
+        self.published: deque[dict[str, object]] = deque(maxlen=10_000)
         self._started = False
 
     @property

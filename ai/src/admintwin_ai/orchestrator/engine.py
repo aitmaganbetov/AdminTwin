@@ -27,7 +27,6 @@ tenant не затрагиваются.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import uuid
@@ -62,7 +61,6 @@ from admintwin_ai.orchestrator.core_client import CoreClient
 from admintwin_ai.orchestrator.costs import CostTrackingSink
 from admintwin_ai.orchestrator.findings import (
     Findings,
-    findings_schema,
     parse_findings,
     sanitize,
 )
@@ -435,42 +433,40 @@ class Orchestrator:
                                evidence: dict[str, Evidence]) -> dict[str, Any]:
         tool_ctx = ToolContext(tenant_id=task.tenant_id, agent=commander, task_id=task.id,
                                incident_id=task.incident_id, correlation_id=task.id)
-        assets: list[dict[str, Any]] = []
-        events: list[dict[str, Any]] = []
-        blast: list[dict[str, Any]] = []
-        counter = 0
+        scope = task.asset_ids[: self.settings.max_context_assets]
+        plan: list[tuple[str, dict[str, Any]]] = [("asset.get", {"asset_id": a}) for a in scope]
+        if scope:
+            plan.append(("topology.blast_radius", {"asset_id": scope[0], "depth": 2}))
+            plan.extend(("events.list", {"asset_id": a, "window": "30m", "limit": 50})
+                        for a in scope)
+        plan = [(n, p) for n, p in plan if n in commander.allowed_tools]
+        # id evidence назначаются до вызовов — детерминированно при параллельном исполнении
+        eids = [f"ev-{commander.id}-{i}" for i in range(1, len(plan) + 1)]
 
-        async def call(name: str, params: dict[str, Any]) -> dict[str, Any] | None:
-            nonlocal counter
-            if name not in commander.allowed_tools:
-                return None
-            counter += 1
-            eid = f"ev-{commander.id}-{counter}"
+        async def call(name: str, params: dict[str, Any], eid: str) -> Evidence | None:
             _, ev = await self.runner.single_tool(
                 tool_ctx, name, params, task.cancel, evidence_id=eid,
                 emit=lambda e, d: self.manager.emit(task, e, d))
             self.ledger.consume(self.scopes(task, commander), tool_calls=1)
-            if ev is None:
-                return None
-            evidence[eid] = ev
-            return ev.data
+            return ev
 
-        for asset_id in task.asset_ids[: self.settings.max_context_assets]:
-            data = await call("asset.get", {"asset_id": asset_id})
-            if data:
-                assets.append(data)
-        if task.asset_ids:
-            data = await call("topology.blast_radius", {"asset_id": task.asset_ids[0],
-                                                        "depth": 2})
-            if data:
-                blast = list(data.get("nodes", []))
-            for asset_id in task.asset_ids[: self.settings.max_context_assets]:
-                data = await call("events.list", {"asset_id": asset_id, "window": "30m",
-                                                  "limit": 50})
-                if data:
-                    events.extend(data.get("events", []))
+        found = await asyncio.gather(*(call(n, p, e) for (n, p), e in zip(plan, eids,
+                                                                          strict=True)))
+        assets: list[dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
+        blast: list[dict[str, Any]] = []
+        for (name, _), ev in zip(plan, found, strict=True):
+            if ev is None or ev.data is None:
+                continue
+            evidence[ev.evidence_id] = ev
+            if name == "asset.get":
+                assets.append(ev.data)
+            elif name == "topology.blast_radius":
+                blast = list(ev.data.get("nodes", []))
+            else:
+                events.extend(ev.data.get("events", []))
         return {"assets": assets, "events": events, "blast_radius": blast,
-                "context_calls": counter}
+                "context_calls": len(plan)}
 
     def _llm_missing(self, task: Task) -> bool:
         if self.llm_configured:
@@ -840,7 +836,9 @@ class Orchestrator:
             system=system_prompt(commander, mode="adjudicate"), user_message=message,
             task_class=TaskClass.RCA, cancel=task.cancel,
             emit=lambda e, d: self.manager.emit(task, e, d), initial_data_class=dc,
-            max_steps=1, use_tools=False, response_schema=findings_schema())
+            # JSON findings проверяется схемой при разборе (parse_findings), а не
+            # response_format провайдера: strict-режимы провайдеров несовместимы между собой
+            max_steps=1, use_tools=False)
         self._drain_costs(task, task.id)
         if run.stopped != "final":
             self.manager.emit(task, "task.progress", {"event": "adjudication.skipped",
@@ -922,7 +920,7 @@ class Orchestrator:
             if active.state is TaskState.WAITING_INPUT:
                 self.manager.provide_input(active, text)
                 return active
-            if not active.terminal:
+            if not active.terminal and active.state is not TaskState.BLOCKED:
                 raise ValueError("session has a running task; wait for it or cancel it")
         task = self.manager.create(tenant_id=session.tenant_id, kind="chat", objective=text,
                                    incident_id=session.incident_id, requested_by=requested_by,
@@ -977,14 +975,3 @@ class Orchestrator:
                            "tool_calls": run.tool_calls}
             return
         manager.fail(task, "too many clarification rounds")
-
-    # --- служебное ------------------------------------------------------------------------------
-
-    async def wait(self, task: Task, timeout_s: float = 30.0) -> Task:
-        with contextlib.suppress(TimeoutError):
-            async with asyncio.timeout(timeout_s):
-                while not task.terminal and task.state not in (TaskState.BLOCKED,
-                                                               TaskState.WAITING_INPUT):
-                    await asyncio.sleep(0.01)
-        return task
-

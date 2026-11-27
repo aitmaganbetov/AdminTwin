@@ -205,12 +205,14 @@ class TaskManager:
     def __init__(self, *, flows: dict[str, Flow] | None = None,
                  on_cancel: Callable[[Task], Awaitable[None]] | None = None,
                  blocked_timeout_s: float = 3600.0,
-                 terminal_hook: Callable[[Task], Awaitable[None]] | None = None) -> None:
+                 terminal_hook: Callable[[Task], Awaitable[None]] | None = None,
+                 max_tasks: int = 10_000) -> None:
         self.flows: dict[str, Flow] = dict(flows or {})
         self._tasks: dict[str, Task] = {}
         self._on_cancel = on_cancel
         self._terminal_hook = terminal_hook
         self.blocked_timeout_s = blocked_timeout_s
+        self.max_tasks = max_tasks
         self._timers: dict[str, asyncio.Task[None]] = {}
         self._killed_tenants: set[str] = set()
         self._platform_killed = False
@@ -259,9 +261,25 @@ class TaskManager:
         else:
             parent.children.append(task.id)
         self._tasks[task.id] = task
+        if parent is None:
+            self._evict()
         self.emit(task, "task.progress", {"state": TaskState.CREATED.value, "kind": kind,
                                           "agent": agent_id})
         return task
+
+    def _evict(self) -> None:
+        """Ретенция в памяти: удаляются самые старые завершённые корневые задачи."""
+        roots = [t for t in self._tasks.values() if t.parent_id is None]
+        excess = len(roots) - self.max_tasks
+        if excess <= 0:
+            return
+        for root in sorted((t for t in roots if t.terminal), key=lambda t: t.updated_at):
+            if excess <= 0:
+                break
+            for cid in root.children:
+                self._tasks.pop(cid, None)
+            self._tasks.pop(root.id, None)
+            excess -= 1
 
     def start(self, task: Task, *, reason: str = "accepted by orchestrator") -> None:
         flow = self.flows.get(task.kind)

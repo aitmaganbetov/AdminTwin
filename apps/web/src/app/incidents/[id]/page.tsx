@@ -441,7 +441,7 @@ function EventsPanel({ inc }: { inc: Incident }) {
       ) : (
         <DataState res={res} moduleName={t("health.module.telemetry")} isEmpty={(d) => d.length === 0}>
           {(evs) => (
-            <ul className="steps">
+            <ul className="steps steps-wide">
               {evs.map((e) => (
                 <li key={e.id}>
                   <StatusBadge kind="severity" value={e.severity} />

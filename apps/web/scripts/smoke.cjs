@@ -142,15 +142,37 @@ async function waitStatus(page, status, timeout = 15000) {
     const opts = sel ? await sel.$$eval("option", (o) => o.map((x) => x.textContent)) : [];
     step("param form generated from schema (inventory select)", !!sel && opts.some((o) => /0a1b2c3d4e5f \(/.test(o)), opts.join(" | "));
 
-    // Stage 1 modules not served yet → graceful "module not available"
-    for (const p of ["/incidents", "/collaboration", "/ai"]) {
+    // Инциденты: событие 502 от сервиса-сборщика → инцидент с владельцем → видно в UI.
+    const CORE = process.env.CORE_URL || "http://localhost:8080";
+    const token = process.env.ADMINTWIN_SERVICE_TOKEN;
+    if (token) {
+      const res = await fetch(`${CORE}/api/v1/telemetry/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AdminTwin-Service-Token": token, "X-AdminTwin-Tenant": TENANT_A,
+          "X-AdminTwin-Actor": "smoke-collector", "X-AdminTwin-Actor-Kind": "service" },
+        body: JSON.stringify({ events: [{ asset_id: DOCKER_WEB, kind: "http_5xx", severity: "high", title: "HTTP 502 on web (smoke)",
+          fingerprint: `smoke-502-${Date.now()}`, value: 38, at: new Date().toISOString() }] }),
+      });
+      const body = await res.json();
+      step("502 event ingested and correlated into an incident", res.status === 202 && (body.incidents || []).length === 1, `status=${res.status}`);
+      await page.goto(`${BASE}/incidents`);
+      await page.waitForSelector("[data-testid=incidents-table] tbody tr", { timeout: 10000 });
+      const rowText = await page.textContent("[data-testid=incidents-table] tbody tr");
+      step("incident listed in UI with owner", /502/.test(rowText || "") && /web-team/.test(rowText || ""), (rowText || "").trim().slice(0, 120));
+      await shot(page, "06-incidents-light");
+      await page.click("[data-testid=incidents-table] tbody tr a");
+      await page.waitForURL(/\/incidents\/[0-9a-f-]{36}/);
+      step("incident detail opens", true, page.url());
+      await shot(page, "06b-incident-detail-light");
+    } else {
+      step("incidents check skipped (ADMINTWIN_SERVICE_TOKEN not set)", true);
+    }
+    // Оркестратор в этом прогоне не настроен → AI-разделы деградируют корректно.
+    for (const p of ["/collaboration", "/ai"]) {
       await page.goto(`${BASE}${p}`);
       await page.waitForSelector("[data-testid=module-unavailable]", { timeout: 10000 });
     }
-    step("incidents / agent collaboration / AI degrade to 'module not available'", true);
-    await page.goto(`${BASE}/incidents`);
-    await page.waitForSelector("[data-testid=module-unavailable]");
-    await shot(page, "06-incidents-unavailable-light");
+    step("agent collaboration / AI degrade to 'module not available' without orchestrator", true);
 
     await page.goto(`${BASE}/topology?asset=${APP_LINUX}`);
     await page.waitForSelector("[data-testid=blast-table] tbody tr");

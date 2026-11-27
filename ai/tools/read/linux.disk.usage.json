@@ -1,0 +1,114 @@
+{
+  "$schema": "https://schemas.admintwin.io/ai/tools/tool-contract.schema.json",
+  "name": "linux.disk.usage",
+  "kind": "read",
+  "version": "1.0.0",
+  "description": "Заполнение файловых систем и inodes (SSH read-only).",
+  "data_class": "internal",
+  "max_response_bytes": 32768,
+  "rate_limit_per_minute": 60,
+  "capabilities": [
+    "SYS-009"
+  ],
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "asset_id"
+    ],
+    "properties": {
+      "asset_id": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "mount": {
+        "type": "string",
+        "pattern": "^/(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9._/-]{0,255}$"
+      }
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "filesystems"
+    ],
+    "properties": {
+      "filesystems": {
+        "type": "array",
+        "maxItems": 200,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mount",
+            "size_bytes",
+            "used_bytes",
+            "avail_bytes",
+            "use_percent"
+          ],
+          "properties": {
+            "mount": {
+              "type": "string"
+            },
+            "device": {
+              "type": "string"
+            },
+            "fstype": {
+              "type": "string"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "used_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "avail_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "use_percent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "inodes_use_percent": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            }
+          }
+        }
+      },
+      "top_dirs": {
+        "type": "array",
+        "maxItems": 50,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "$schema": "https://schemas.admintwin.io/ai/tools/tool-contract.schema.json",
+  "name": "fortigate.policy.status",
+  "kind": "read",
+  "version": "1.0.0",
+  "description": "Статус и счётчики firewall-политик FortiGate (REST API, read-only токен в Gateway).",
+  "data_class": "confidential",
+  "max_response_bytes": 32768,
+  "rate_limit_per_minute": 60,
+  "capabilities": [
+    "NET-006"
+  ],
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "asset_id"
+    ],
+    "properties": {
+      "asset_id": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "policy_id": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1000000
+      },
+      "vdom": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9_-]{1,31}$"
+      }
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "policies"
+    ],
+    "properties": {
+      "policies": {
+        "type": "array",
+        "maxItems": 500,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policy_id",
+            "action",
+            "status"
+          ],
+          "properties": {
+            "policy_id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 255
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "deny",
+                "ipsec"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "enable",
+                "disable"
+              ]
+            },
+            "srcintf": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "dstintf": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "hit_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "last_used": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      },
+      "ha_status": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    }
+  }
+}

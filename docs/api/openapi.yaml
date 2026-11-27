@@ -1,0 +1,318 @@
+openapi: 3.1.0
+info:
+  title: AdminTwin Core API
+  version: 0.1.0
+  summary: AI Infrastructure Digital Twin & Autonomous IT Operations Platform — ядро (Stage 0)
+  description: |
+    Единая точка любой записи в инфраструктуру — `POST /api/v1/changes` (ТЗ §11, §13).
+    `POST /api/v1/executions` отсутствует: исполнения создаёт только Change Coordinator.
+    Ошибки — RFC 9457 (`application/problem+json`), тип в домене `https://errors.admintwin.io/`.
+
+    **Аутентификация.** Production — OIDC/JWT (в разработке). В Stage 0 доступен только dev-режим
+    `ADMINTWIN_DEV_AUTH=true` с заголовками `X-AdminTwin-*`; без него все запросы, кроме health, — 401.
+servers:
+  - url: http://localhost:8080
+security:
+  - devHeaders: []
+tags:
+  - name: inventory
+  - name: changes
+  - name: registry
+  - name: safety
+  - name: audit
+paths:
+  /api/v1/health/platform:
+    get:
+      tags: [safety]
+      security: []
+      summary: Здоровье платформы (M24)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+  /api/v1/assets:
+    get:
+      tags: [inventory]
+      summary: Активы tenant
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AssetList" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+  /api/v1/assets/{id}:
+    get:
+      tags: [inventory]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Asset" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/assets/{id}/blast-radius:
+    get:
+      tags: [inventory]
+      summary: Транзитивно зависимые активы с confidence (глубина ≤ 5)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asset_id: { type: string, format: uuid }
+                  max_depth: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/Impacted" } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/topology:
+    get:
+      tags: [inventory]
+      responses:
+        "200": { description: Узлы и рёбра с источником и confidence, content: { application/json: { schema: { type: object } } } }
+  /api/v1/runbooks:
+    get:
+      tags: [registry]
+      summary: Каталог сертифицированных runbook
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+  /api/v1/capabilities:
+    get:
+      tags: [registry]
+      parameters:
+        - { name: tier, in: query, schema: { type: string, enum: [MVP, P1a, P1b, P2] } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+  /api/v1/capabilities/{id}/tests:
+    get:
+      tags: [registry]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^[A-Z]{2,4}-\\d{3}$" } }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/capabilities/traceability:
+    get:
+      tags: [registry]
+      summary: Матрица трассируемости стандарт × capability × артефакт (генерируется из реестров)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+  /api/v1/standards:
+    get:
+      tags: [registry]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+  /api/v1/changes:
+    post:
+      tags: [changes]
+      summary: Создать ChangeRequest (человек или propose-tool агента)
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeCreate" }
+      responses:
+        "201": { description: "Создан: proposed (Observer/Advisor) или уже завершён", content: { application/json: { schema: { $ref: "#/components/schemas/Change" } } } }
+        "202": { description: "Принят: waiting_approval или исполняется", content: { application/json: { schema: { $ref: "#/components/schemas/Change" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      tags: [changes]
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/Change" } } } } } } }
+  /api/v1/changes/{id}:
+    get:
+      tags: [changes]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Change" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/changes/{id}/decisions:
+    post:
+      tags: [changes]
+      summary: Согласовать / отклонить (только человек; не автор; dual control для critical)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, reject] }
+                comment: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Change" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /api/v1/changes/{id}/cancel:
+    post:
+      tags: [changes]
+      summary: Отмена; для исполняемых — cooperative cancellation (cancellation_pending)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, properties: { reason: { type: string } } }
+      responses:
+        "202": { description: Accepted, content: { application/json: { schema: { $ref: "#/components/schemas/Change" } } } }
+        "409": { $ref: "#/components/responses/Problem" }
+  /api/v1/changes/{id}/executions:
+    get:
+      tags: [changes]
+      summary: Дочерние ExecutionRequest (read-only)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+  /api/v1/executions/{id}:
+    get:
+      tags: [changes]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/kill-switch:
+    get:
+      tags: [safety]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+    post:
+      tags: [safety]
+      summary: Аварийная остановка (tenant — TA/ITM/Operator; platform — Super Admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [active, reason]
+              properties:
+                scope: { type: string, enum: [tenant, platform], default: tenant }
+                active: { type: boolean }
+                reason: { type: string, minLength: 1 }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/audit-logs:
+    get:
+      tags: [audit]
+      parameters:
+        - { name: object_id, in: query, schema: { type: string } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/audit-logs/integrity:
+    get:
+      tags: [audit]
+      summary: Верификация hash chain и подписанный checkpoint (Auditor, Compliance Manager, Tenant Admin)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+  /api/v1/evidence/{id}:
+    get:
+      tags: [audit]
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: purpose, in: query, required: true, schema: { type: string, minLength: 1 }, description: purpose-of-access, журналируется }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+components:
+  securitySchemes:
+    devHeaders:
+      type: apiKey
+      in: header
+      name: X-AdminTwin-Actor
+      description: "DEV ONLY. Также X-AdminTwin-Tenant, X-AdminTwin-Actor-Kind (user|ai_agent|service), X-AdminTwin-Roles, X-AdminTwin-Scopes."
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+  responses:
+    Problem:
+      description: RFC 9457
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          examples: ["https://errors.admintwin.io/policy-denied"]
+          description: "policy-denied | budget-exhausted | kill-switch-active | legal-hold | separation-of-duties | invalid-params | not-found | unauthenticated | forbidden | conflict | idempotency-key-reused | bad-request | internal"
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        policy_id: { type: string }
+        change_id: { type: string }
+        request_id: { type: string }
+        errors: { type: array, items: { type: object, properties: { field: { type: string }, reason: { type: string } } } }
+    ChangeCreate:
+      type: object
+      additionalProperties: false
+      required: [runbook_id, asset_id, params, reason]
+      properties:
+        runbook_id: { type: string, examples: [docker.container.restart] }
+        asset_id: { type: string, format: uuid }
+        params: { type: object, description: Валидируются по схеме runbook и allowlist; значения из inventory проверяются в CMDB tenant }
+        reason: { type: string, minLength: 1 }
+        incident_id: { type: [string, "null"], format: uuid }
+        type: { type: string, enum: [standard, normal, emergency], default: normal, description: emergency — break-glass, только TA/ITM }
+        dry_run: { type: boolean, default: false }
+    Change:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        type: { type: string, enum: [standard, normal, emergency] }
+        status:
+          type: string
+          enum: [draft, impact_assessed, risk_assessed, waiting_approval, proposed, approved, rejected, scheduled, preflight_failed,
+                 executing, verified, rolled_back, compensated, failed, cancellation_pending, cancelled, unknown, manual_review,
+                 closed, closed_with_rollback, closed_with_compensation]
+        runbook_id: { type: string }
+        runbook_version: { type: string }
+        runbook_digest: { type: string }
+        risk: { type: string, enum: [low, medium, high, critical] }
+        asset_id: { type: string }
+        params: { type: object }
+        author_id: { type: string }
+        author_kind: { type: string, enum: [user, ai_agent, service] }
+        impact: { type: object }
+        policy: { type: object }
+        decisions: { type: array, items: { type: object } }
+        executions: { type: array, items: { type: object } }
+        follow_up_proposals: { type: array, items: { type: string } }
+        transitions: { type: array, items: { type: object, properties: { from: { type: string }, to: { type: string }, actor: { type: string }, reason: { type: string }, at: { type: string, format: date-time } } } }
+        pir_required: { type: boolean }
+        pir_due_at: { type: [string, "null"], format: date-time }
+    Asset:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        name: { type: string }
+        type: { type: string }
+        environment: { type: string, enum: [production, staging, dev, test] }
+        ring: { type: string }
+        service_tier: { type: integer, minimum: 0, maximum: 3 }
+        criticality: { type: string }
+        data_class: { type: string, enum: [public, internal, confidential, pii, secret] }
+        legal_hold: { type: boolean }
+        owner: { type: string }
+        verified: { type: boolean }
+    AssetList:
+      type: object
+      properties: { items: { type: array, items: { $ref: "#/components/schemas/Asset" } } }
+    Impacted:
+      type: object
+      properties:
+        asset_id: { type: string }
+        name: { type: string }
+        depth: { type: integer }
+        confidence: { type: number }
+        service_tier: { type: integer }
+        criticality: { type: string }

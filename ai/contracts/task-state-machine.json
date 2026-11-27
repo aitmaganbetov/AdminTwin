@@ -1,0 +1,22 @@
+{
+  "$comment": "Task state machine (ТЗ §7). Данные, а не код (C.10): читается Python-оркестратором и может читаться ядром на Go. Отмена (cancelled) допустима из любого нетерминального состояния — kill switch §11.7.",
+  "schema_version": "1.3",
+  "initial": "created",
+  "terminal": ["completed", "failed", "cancelled", "timed_out"],
+  "transitions": {
+    "created": ["queued", "cancelled"],
+    "queued": ["running", "cancelled"],
+    "running": ["completed", "waiting_approval", "waiting_input", "blocked", "failed", "cancelled", "timed_out"],
+    "waiting_approval": ["running", "cancelled"],
+    "waiting_input": ["running", "cancelled"],
+    "blocked": ["running", "timed_out", "cancelled"],
+    "completed": [],
+    "failed": [],
+    "cancelled": [],
+    "timed_out": []
+  },
+  "notify_on": [
+    {"from": "waiting_input", "to": "cancelled", "notify": "requester"},
+    {"from": "blocked", "to": "timed_out", "notify": "requester"}
+  ]
+}

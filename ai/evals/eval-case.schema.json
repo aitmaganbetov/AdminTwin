@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.admintwin.io/ai/evals/eval-case.schema.json",
+  "title": "AdminTwin golden dataset case (M22)",
+  "description": "Одна строка JSONL golden dataset: инцидент с известной причиной, evidence и ожидаемыми проверками (ТЗ §6.10).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["case_id", "scenario", "title", "input", "expected"],
+  "properties": {
+    "case_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{2,63}$"},
+    "scenario": {"type": "string", "enum": ["http_502", "disk_exhaustion", "container_stop"]},
+    "title": {"type": "string", "minLength": 3, "maxLength": 300},
+    "input": {
+      "type": "object",
+      "required": ["alert"],
+      "properties": {
+        "alert": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {"type": "string"},
+            "asset_type": {"type": "string"},
+            "service_kind": {"type": "string"},
+            "summary": {"type": "string"}
+          }
+        },
+        "signals": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root_cause", "evidence", "expected_checks"],
+      "properties": {
+        "root_cause": {"type": "string", "pattern": "^[a-z][a-z0-9_]{2,63}$"},
+        "acceptable_causes": {"type": "array", "items": {"type": "string"}},
+        "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "expected_checks": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "excluded_causes": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "tags": {"type": "array", "items": {"type": "string"}}
+  }
+}

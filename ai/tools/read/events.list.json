@@ -1,0 +1,108 @@
+{
+  "$schema": "https://schemas.admintwin.io/ai/tools/tool-contract.schema.json",
+  "name": "events.list",
+  "kind": "read",
+  "version": "1.0.0",
+  "description": "События и алерты, скоррелированные с активом.",
+  "data_class": "internal",
+  "max_response_bytes": 32768,
+  "rate_limit_per_minute": 60,
+  "capabilities": [
+    "SYS-011",
+    "ITSM-001"
+  ],
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "window"
+    ],
+    "properties": {
+      "asset_id": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "window": {
+        "type": "string",
+        "pattern": "^[1-9][0-9]{0,3}[smhd]$",
+        "description": "Окно назад от текущего момента: 15m, 1h, 7d"
+      },
+      "severity": {
+        "type": "string",
+        "enum": [
+          "critical",
+          "high",
+          "medium",
+          "low",
+          "info"
+        ]
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 200
+      }
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "events"
+    ],
+    "properties": {
+      "events": {
+        "type": "array",
+        "maxItems": 200,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "ts",
+            "type",
+            "severity",
+            "summary"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "ts": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "asset_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "type": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info"
+              ]
+            },
+            "summary": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          }
+        }
+      }
+    }
+  }
+}

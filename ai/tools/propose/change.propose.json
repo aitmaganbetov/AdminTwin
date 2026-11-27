@@ -1,0 +1,91 @@
+{
+  "$schema": "https://schemas.admintwin.io/ai/tools/tool-contract.schema.json",
+  "name": "change.propose",
+  "kind": "propose",
+  "version": "1.0.0",
+  "description": "Создаёт ChangeRequest по runbook из каталога (POST /api/v1/changes). Единственный способ инициировать запись. Решение принимают Policy Engine и человек; агент не может согласовать.",
+  "data_class": "internal",
+  "max_response_bytes": 8192,
+  "rate_limit_per_minute": 10,
+  "capabilities": [
+    "ITSM-003"
+  ],
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "runbook_id",
+      "asset_id",
+      "params",
+      "reason"
+    ],
+    "properties": {
+      "runbook_id": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(\\.[a-z0-9_]+){1,4}$",
+        "maxLength": 128
+      },
+      "asset_id": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "params": {
+        "type": "object",
+        "maxProperties": 20,
+        "propertyNames": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "additionalProperties": {
+          "type": [
+            "string",
+            "integer",
+            "number",
+            "boolean"
+          ],
+          "maxLength": 512
+        }
+      },
+      "reason": {
+        "type": "string",
+        "minLength": 10,
+        "maxLength": 2000
+      },
+      "incident_id": {
+        "oneOf": [
+          {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "change_id",
+      "status"
+    ],
+    "properties": {
+      "change_id": {
+        "type": "string",
+        "maxLength": 64
+      },
+      "status": {
+        "type": "string",
+        "maxLength": 64
+      },
+      "runbook_id": {
+        "type": "string"
+      }
+    }
+  }
+}

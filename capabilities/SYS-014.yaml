@@ -1,0 +1,21 @@
+capability_id: SYS-014
+version: 1.0.0
+domain: system_administration
+name: Troubleshooting — корреляция журналов, contention (частично)
+tier: MVP
+mode: build
+owner_agent: linux-admin
+supporting_agents: [ai-commander]
+standards: [STD-02]
+operations:
+  - {level: observe,   tool: events.list}
+  - {level: diagnose,  tool: logs.search}
+  - {level: recommend, tool: topology.blast_radius}
+asset_types: [linux_host]
+preconditions: [asset_verified]
+risk: low
+autonomy_ceiling: observer
+approval_policy: none_read_only
+evidence_schema: [rca_hypotheses, evidence_refs]
+tests: [T-AI-001]
+lifecycle_state: in_development

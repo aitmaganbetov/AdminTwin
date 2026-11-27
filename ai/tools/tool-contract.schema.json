@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.admintwin.io/ai/tools/tool-contract.schema.json",
+  "title": "AdminTwin Tool Layer contract",
+  "description": "Контракт инструмента Tool Layer (ТЗ §3.3). kind — только read или propose: инструментов уровня execute не существует (T-CAP-003).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "kind", "version", "description", "data_class", "max_response_bytes",
+               "rate_limit_per_minute", "capabilities", "input_schema", "output_schema"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,3}$"},
+    "kind": {"type": "string", "enum": ["read", "propose"]},
+    "version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$"},
+    "description": {"type": "string", "minLength": 10, "maxLength": 1000},
+    "data_class": {"type": "string", "enum": ["public", "internal", "confidential", "pii"]},
+    "max_response_bytes": {"type": "integer", "minimum": 256, "maximum": 1048576},
+    "rate_limit_per_minute": {"type": "integer", "minimum": 1, "maximum": 6000},
+    "capabilities": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z]{2,5}-\\d{3}$"}},
+    "input_schema": {
+      "type": "object",
+      "required": ["type", "properties", "additionalProperties"],
+      "properties": {
+        "type": {"const": "object"},
+        "additionalProperties": {"const": false},
+        "properties": {"type": "object", "not": {"required": ["tenant_id"]}}
+      }
+    },
+    "output_schema": {"type": "object", "required": ["type"]}
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://schemas.admintwin.io/ai/tools/tool-contract.schema.json",
+  "name": "linux.service.status",
+  "kind": "read",
+  "version": "1.0.0",
+  "description": "Статус systemd unit (SSH read-only).",
+  "data_class": "internal",
+  "max_response_bytes": 32768,
+  "rate_limit_per_minute": 60,
+  "capabilities": [
+    "SYS-002"
+  ],
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "asset_id",
+      "unit"
+    ],
+    "properties": {
+      "asset_id": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "unit": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9@._:-]{1,200}\\.(service|socket|timer|mount|target)$"
+      }
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "unit",
+      "active_state",
+      "sub_state"
+    ],
+    "properties": {
+      "unit": {
+        "type": "string"
+      },
+      "load_state": {
+        "type": "string",
+        "maxLength": 32
+      },
+      "active_state": {
+        "type": "string",
+        "enum": [
+          "active",
+          "reloading",
+          "inactive",
+          "failed",
+          "activating",
+          "deactivating"
+        ]
+      },
+      "sub_state": {
+        "type": "string",
+        "maxLength": 32
+      },
+      "since": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "main_pid": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "recent_log": {
+        "type": "array",
+        "maxItems": 50,
+        "items": {
+          "type": "string",
+          "maxLength": 4096
+        }
+      }
+    }
+  }
+}

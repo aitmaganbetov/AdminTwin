@@ -7,6 +7,7 @@ COPY cmd ./cmd
 COPY internal ./internal
 COPY pkg ./pkg
 COPY services ./services
+COPY connectors ./connectors
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/admintwin-core ./cmd/admintwin-core
 
 FROM gcr.io/distroless/static-debian12:nonroot
@@ -15,6 +16,7 @@ COPY --from=build /out/admintwin-core /usr/local/bin/admintwin-core
 COPY runbooks ./runbooks
 COPY capabilities ./capabilities
 COPY standards ./standards
+COPY db/migrations ./db/migrations
 COPY ai/tools ./ai/tools
 COPY infra/dev/fixtures.yaml ./infra/dev/fixtures.yaml
 ENV ADMINTWIN_ROOT=/opt/admintwin ADMINTWIN_ADDR=:8080

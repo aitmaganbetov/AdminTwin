@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import anthropic
 import httpx
 import openai
 import pytest
-from fakes import FakeAnthropicClient, FakeOpenAIClient, anthropic_message, openai_completion
 
 from admintwin_ai.errors import (
     CapabilityNotSupportedError,
@@ -31,6 +31,8 @@ from admintwin_ai.providers.claude import CLAUDE_MODE_CAPABILITIES, ClaudeProvid
 from admintwin_ai.providers.local import LocalProvider
 from admintwin_ai.providers.openai import OPENAI_MODE_CAPABILITIES, OpenAIProvider
 from admintwin_ai.providers.tool_format import from_native_name, to_native_name
+
+from fakes import FakeAnthropicClient, FakeOpenAIClient, anthropic_message, openai_completion
 
 METRICS_TOOL = ToolSpec(
     name="metrics.query",
@@ -270,18 +272,18 @@ def test_local_endpoint_pinning_and_max_tokens_param() -> None:
 
 
 def test_local_stream_and_embeddings() -> None:
-    from types import SimpleNamespace as NS
+    ns = SimpleNamespace
 
     chunks = [
-        NS(model="m", usage=None, choices=[NS(delta=NS(content="Hel", tool_calls=None),
+        ns(model="m", usage=None, choices=[ns(delta=ns(content="Hel", tool_calls=None),
                                               finish_reason=None)]),
-        NS(model="m", usage=None, choices=[NS(delta=NS(content=None, tool_calls=[
-            NS(index=0, id="c1", function=NS(name="metrics__query", arguments='{"asset_'))]),
+        ns(model="m", usage=None, choices=[ns(delta=ns(content=None, tool_calls=[
+            ns(index=0, id="c1", function=ns(name="metrics__query", arguments='{"asset_'))]),
             finish_reason=None)]),
-        NS(model="m", usage=None, choices=[NS(delta=NS(content=None, tool_calls=[
-            NS(index=0, id=None, function=NS(name=None, arguments='id": "a1"}'))]),
+        ns(model="m", usage=None, choices=[ns(delta=ns(content=None, tool_calls=[
+            ns(index=0, id=None, function=ns(name=None, arguments='id": "a1"}'))]),
             finish_reason="tool_calls")]),
-        NS(model="m", usage=NS(prompt_tokens=4, completion_tokens=2), choices=[]),
+        ns(model="m", usage=ns(prompt_tokens=4, completion_tokens=2), choices=[]),
     ]
     client = FakeOpenAIClient([iter(chunks)])
     p = LocalProvider("l", base_url="http://llm:8000/v1", allowed_endpoints=["http://llm:8000/v1"],

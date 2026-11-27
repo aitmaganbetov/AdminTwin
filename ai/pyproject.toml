@@ -56,10 +56,16 @@ ignore = [
   "RUF001", # ambiguous unicode in strings: payloads are deliberately multilingual
   "RUF002",
   "RUF003",
+  "PT018",  # composite assertions are fine in tests
 ]
+
+[tool.ruff.lint.isort]
+known-first-party = ["admintwin_ai"]
+known-local-folder = ["fakes", "support"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "S108", "S311"]
+"src/admintwin_ai/masking.py" = ["S105"]  # MaskKind.SECRET — имя плейсхолдера, не пароль
 
 [tool.mypy]
 python_version = "3.12"

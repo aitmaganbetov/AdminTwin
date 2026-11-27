@@ -12,7 +12,7 @@ class DataClass(StrEnum):
     INTERNAL = "internal"
     CONFIDENTIAL = "confidential"
     PII = "pii"
-    SECRET = "secret"
+    SECRET = "secret"  # noqa: S105 - класс данных, не пароль
     UNKNOWN = "unknown"
 
     @property

@@ -20,7 +20,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from admintwin_ai.errors import ContractValidationError
 from admintwin_ai.resources import load_json
 
-SCHEMA_VERSION = "1.3"
+SCHEMA_VERSION: Literal["1.3"] = "1.3"
 
 
 class MessageType(StrEnum):

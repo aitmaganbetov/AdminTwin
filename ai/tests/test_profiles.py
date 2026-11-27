@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from fakes import FakeAnthropicClient, FakeOpenAIClient, FakeProvider, make_registry
 
 from admintwin_ai.agents import AgentRegistry, load_agents
 from admintwin_ai.config import EnvSecretResolver, build_registry, load_config
@@ -16,6 +15,8 @@ from admintwin_ai.profiles import (
 )
 from admintwin_ai.providers import Capability, ProviderCapabilities
 from admintwin_ai.resources import data_path
+
+from fakes import FakeAnthropicClient, FakeOpenAIClient, FakeProvider, make_registry
 
 NO_TOOLS = ProviderCapabilities(tool_calling=False, structured_output=False, streaming=True,
                                 embeddings=True, max_context=8192)

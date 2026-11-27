@@ -9,6 +9,7 @@ from admintwin_ai.tools.registry import (
     ToolBackendError,
     ToolContract,
     ToolDefinition,
+    ToolHandler,
     ToolKind,
     ToolOutput,
     ToolRefusal,
@@ -21,7 +22,7 @@ from admintwin_ai.tools.wrapping import parse_wrapped, wrap_untrusted
 
 def build_tool_registry(backend: ReadBackend, propose: ChangeProposeHandler) -> ToolRegistry:
     """Реестр MVP: 10 read tools + ``change.propose``."""
-    handlers = {**read_handlers(backend), "change.propose": propose}
+    handlers: dict[str, ToolHandler] = {**read_handlers(backend), "change.propose": propose}
     return register_all(ToolRegistry(), handlers)
 
 

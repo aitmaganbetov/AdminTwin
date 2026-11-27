@@ -56,6 +56,8 @@ type Server struct {
 	Checks []HealthCheck
 	// SaveTenant — сохранение политики tenant.
 	SaveTenant func(policy.TenantPolicy) error
+
+	patterns []string
 }
 
 // Handler строит маршруты ядра и подключённых модулей.
@@ -109,8 +111,12 @@ func (s *Server) Handler() http.Handler {
 	for _, m := range s.Modules {
 		m.Routes(rt)
 	}
+	s.patterns = append([]string{"GET /api/v1/health/platform"}, rt.Patterns...)
 	return s.middleware(mux)
 }
+
+// RoutePatterns — маршруты, опубликованные последним вызовом Handler().
+func (s *Server) RoutePatterns() []string { return append([]string(nil), s.patterns...) }
 
 type ctxReqID struct{}
 

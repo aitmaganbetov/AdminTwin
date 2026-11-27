@@ -23,6 +23,8 @@ jobs:
           go-version: "1.24"
       - name: lint
         run: make lint
+      - name: OpenAPI document is valid
+        run: pipx run openapi-spec-validator==0.7.1 docs/api/openapi.yaml
       - name: unit + e2e (race)
         run: make test-race
       - name: PostgreSQL — RLS isolation (T-TENANT-001) and core store across restarts

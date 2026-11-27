@@ -8,18 +8,23 @@ info:
     `POST /api/v1/executions` отсутствует: исполнения создаёт только Change Coordinator.
     Ошибки — RFC 9457 (`application/problem+json`), тип в домене `https://errors.admintwin.io/`.
 
-    **Аутентификация.** Production — OIDC/JWT (в разработке). В Stage 0 доступен только dev-режим
-    `ADMINTWIN_DEV_AUTH=true` с заголовками `X-AdminTwin-*`; без него все запросы, кроме health, — 401.
+    **Аутентификация.** Пользователи — OIDC `Authorization: Bearer <JWT>` (RS256/PS256/ES256; tenant, роли и scopes —
+    из утверждений `admintwin_tenant`, `admintwin_roles`, `admintwin_scopes`; MFA — по `amr`). Сервисы — заголовок
+    `X-AdminTwin-Service-Token` + `X-AdminTwin-Tenant/Actor/Actor-Kind` (только `ai_agent` или `service`).
+    Dev-режим `ADMINTWIN_DEV_AUTH=true` — заголовки `X-AdminTwin-*`, только для локальной разработки.
+    Согласования, kill switch, break-glass и смена политики требуют MFA (`403 mfa-required`).
 servers:
   - url: http://localhost:8080
 security:
-  - devHeaders: []
+  - oidc: []
+  - serviceToken: []
 tags:
   - name: inventory
   - name: changes
   - name: registry
   - name: safety
   - name: audit
+  - name: ai
 paths:
   /api/v1/health/platform:
     get:
@@ -214,12 +219,139 @@ paths:
       tags: [audit]
       parameters:
         - { $ref: "#/components/parameters/Id" }
-        - { name: purpose, in: query, required: true, schema: { type: string, minLength: 1 }, description: purpose-of-access, журналируется }
+        - { name: purpose, in: query, required: true, schema: { type: string, minLength: 1 }, description: "purpose-of-access; журналируется" }
       responses:
         "200": { description: OK, content: { application/json: { schema: { type: object } } } }
         "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/tools:
+    get:
+      tags: [registry]
+      summary: Read tools, доступные субъекту (для агента — только его tool scope)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+  /api/v1/tools/{name}:
+    post:
+      tags: [registry]
+      summary: Вызов read tool (Tool Service §3.3). Вход/выход — по ai/tools/read/{name}.json; execute-инструментов не существует
+      parameters: [{ name: name, in: path, required: true, schema: { type: string, examples: [metrics.query] } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, properties: { input: { type: object } } } } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tool: { type: string }
+                  version: { type: string }
+                  data_class: { type: string, enum: [public, internal, confidential, pii, secret, unknown] }
+                  data: { type: object }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/tenant/policy:
+    get:
+      tags: [safety]
+      summary: Режим автономности и политика tenant
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/TenantPolicy" } } } }
+    put:
+      tags: [safety]
+      summary: Изменить политику / режим (только Tenant Admin, MFA; аудит)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/TenantPolicy" } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/TenantPolicy" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/changes/{id}/pir:
+    post:
+      tags: [changes]
+      summary: Post-implementation review (IT Manager / Tenant Admin, не автор); закрывает manual_review
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [summary]
+              properties:
+                summary: { type: string, minLength: 10 }
+                findings: { type: string }
+                corrective_actions: { type: array, items: { type: string } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Change" } } } }
+        "409": { $ref: "#/components/responses/Problem" }
+  /api/v1/agent-tasks:
+    get:
+      tags: [ai]
+      summary: Задачи AI (прокси к оркестратору; tenant — из идентичности)
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [ai]
+      summary: Создать AI-задачу (TA, ITM, Engineer, Operator)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind: { type: string, enum: [rca, chat, diagnose] }
+                objective: { type: string }
+                incident_id: { type: string, format: uuid }
+                scope: { type: object, properties: { asset_ids: { type: array, items: { type: string, format: uuid } } } }
+      responses:
+        "202": { description: Accepted }
+        "502": { $ref: "#/components/responses/Problem" }
+  /api/v1/agent-tasks/{rest}:
+    get:
+      tags: [ai]
+      summary: "{id}, {id}/events (SSE, Last-Event-ID)"
+      parameters: [{ name: rest, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: "JSON или text/event-stream" }
+    post:
+      tags: [ai]
+      summary: "{id}/cancel, {id}/input"
+      parameters: [{ name: rest, in: path, required: true, schema: { type: string } }]
+      responses:
+        "202": { description: Accepted }
+  /api/v1/chat/sessions:
+    post:
+      tags: [ai]
+      summary: Сессия ChatOps
+      responses:
+        "201": { description: Created }
+  /api/v1/chat/sessions/{rest}:
+    get:
+      tags: [ai]
+      summary: "{id}/events (SSE)"
+      parameters: [{ name: rest, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: text/event-stream }
+    post:
+      tags: [ai]
+      summary: "{id}/messages"
+      parameters: [{ name: rest, in: path, required: true, schema: { type: string } }]
+      responses:
+        "202": { description: Accepted }
 components:
   securitySchemes:
+    oidc:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    serviceToken:
+      type: apiKey
+      in: header
+      name: X-AdminTwin-Service-Token
     devHeaders:
       type: apiKey
       in: header
@@ -250,6 +382,15 @@ components:
         change_id: { type: string }
         request_id: { type: string }
         errors: { type: array, items: { type: object, properties: { field: { type: string }, reason: { type: string } } } }
+    TenantPolicy:
+      type: object
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        mode: { type: string, enum: [observer, advisor, operator, autonomous] }
+        autonomous_medium_runbooks: { type: array, items: { type: string } }
+        denied_runbooks_by_environment: { type: object, additionalProperties: { type: array, items: { type: string } } }
+        maintenance_windows: { type: array, items: { type: object, properties: { start: { type: string, format: date-time }, end: { type: string, format: date-time } } } }
     ChangeCreate:
       type: object
       additionalProperties: false

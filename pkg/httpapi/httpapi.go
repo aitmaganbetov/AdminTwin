@@ -21,13 +21,21 @@ type Handler func(w http.ResponseWriter, r *http.Request, a identity.Actor)
 type Router struct {
 	Mux  *http.ServeMux
 	Wrap func(Handler) http.HandlerFunc
+	// Patterns — зарегистрированные маршруты (для контрактного теста с OpenAPI).
+	Patterns []string
 }
 
 // Handle — аутентифицированный маршрут ("GET /api/v1/...").
-func (r *Router) Handle(pattern string, h Handler) { r.Mux.HandleFunc(pattern, r.Wrap(h)) }
+func (r *Router) Handle(pattern string, h Handler) {
+	r.Patterns = append(r.Patterns, pattern)
+	r.Mux.HandleFunc(pattern, r.Wrap(h))
+}
 
 // Public — маршрут без аутентификации (health, OIDC callback). Использовать осознанно.
-func (r *Router) Public(pattern string, h http.HandlerFunc) { r.Mux.HandleFunc(pattern, h) }
+func (r *Router) Public(pattern string, h http.HandlerFunc) {
+	r.Patterns = append(r.Patterns, pattern)
+	r.Mux.HandleFunc(pattern, h)
+}
 
 // Module — сервис, публикующий маршруты API.
 type Module interface {

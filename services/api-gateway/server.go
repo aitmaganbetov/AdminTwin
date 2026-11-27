@@ -107,6 +107,7 @@ func (s *Server) Handler() http.Handler {
 	rt.Handle("GET /api/v1/tenant/policy", s.getTenantPolicy)
 	rt.Handle("PUT /api/v1/tenant/policy", s.putTenantPolicy)
 	rt.Handle("POST /api/v1/changes/{id}/pir", s.recordPIR)
+	rt.Handle("POST /api/v1/audit/ai-calls", s.recordAICalls)
 
 	for _, m := range s.Modules {
 		m.Routes(rt)

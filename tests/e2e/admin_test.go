@@ -89,3 +89,45 @@ func TestMetricsAndHealth(t *testing.T) {
 		t.Fatalf("health: %d %s", h.Status, h.Raw)
 	}
 }
+
+func TestAICallAuditIngest(t *testing.T) {
+	e := newEnv(t)
+	orch := who{tenantA, "orchestrator", "service", "", ""}
+	rec := map[string]any{"record_type": "llm_call", "call_id": "c1", "tenant_id": tenantA, "agent_id": "devops-engineer",
+		"provider": "anthropic", "model": "m", "prompt_version": "v1", "input_sha256": strings.Repeat("a", 64), "status": "ok"}
+	if r := e.do(orch, "POST", "/api/v1/audit/ai-calls", map[string]any{"records": []any{rec}}); r.Status != 202 {
+		t.Fatalf("orchestrator ingest: %d %s", r.Status, r.Raw)
+	}
+	for _, w := range []who{{tenantA, "collector", "service", "", ""}, agentA, adminA} {
+		if r := e.do(w, "POST", "/api/v1/audit/ai-calls", map[string]any{"records": []any{rec}}); r.Status != 403 {
+			t.Errorf("%s must not write AI audit: %d", w.id, r.Status)
+		}
+	}
+	other := map[string]any{}
+	for k, v := range rec {
+		other[k] = v
+	}
+	other["tenant_id"] = tenantB
+	if r := e.do(orch, "POST", "/api/v1/audit/ai-calls", map[string]any{"records": []any{other}}); r.Status != 403 {
+		t.Errorf("cross-tenant record: %d", r.Status)
+	}
+	rec["input_sha256"] = "not-a-hash"
+	if r := e.do(orch, "POST", "/api/v1/audit/ai-calls", map[string]any{"records": []any{rec}}); r.Status != 422 {
+		t.Errorf("invalid hash: %d", r.Status)
+	}
+	rec["input_sha256"] = strings.Repeat("a", 64)
+	rec["prompt"] = "raw prompt text"
+	if r := e.do(orch, "POST", "/api/v1/audit/ai-calls", map[string]any{"records": []any{rec}}); r.Status != 400 {
+		t.Errorf("raw prompt fields must be rejected: %d", r.Status)
+	}
+	found := false
+	for _, it := range e.do(auditorA, "GET", "/api/v1/audit-logs", nil).Body["items"].([]any) {
+		m := it.(map[string]any)
+		if m["action"] == "ai.llm_call" && m["actor"] == "ai_agent:devops-engineer" {
+			found = m["data"].(map[string]any)["provider"] == "anthropic"
+		}
+	}
+	if !found {
+		t.Fatal("LLM call must be in the tenant audit chain")
+	}
+}

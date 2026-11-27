@@ -39,6 +39,8 @@ class ServiceSettings(BaseModel):
     port: int = 8090
     ai_config: str | None = None
     offline_fake: bool = False
+    # Метаданные вызовов LLM/инструментов — в аудит ядра (POST /api/v1/audit/ai-calls).
+    audit_to_core: bool = True
     nats_url: str | None = None
     tenant_policies: str | None = None
     log_level: str = "info"
@@ -87,6 +89,7 @@ class ServiceSettings(BaseModel):
             port=int(_num(env, "ADMINTWIN_ORCHESTRATOR_PORT", 8090)),
             ai_config=env.get("ADMINTWIN_AI_CONFIG") or None,
             offline_fake=_bool(env, "ADMINTWIN_AI_OFFLINE_FAKE"),
+            audit_to_core=env.get("ADMINTWIN_AUDIT_TO_CORE", "true").lower() != "false",
             nats_url=env.get("ADMINTWIN_NATS_URL") or None,
             tenant_policies=env.get("ADMINTWIN_TENANT_POLICIES") or None,
             log_level=env.get("ADMINTWIN_LOG_LEVEL", "info"),

@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/aitmaganbetov/admintwin/pkg/identity"
@@ -112,4 +114,108 @@ func (s *Server) recordPIR(w http.ResponseWriter, r *http.Request, a identity.Ac
 		return
 	}
 	writeJSON(w, 200, changeView(cr))
+}
+
+// aiCallRecord — запись о вызове LLM или инструмента агентом (метаданные; сырые промпты не принимаются).
+type aiCallRecord struct {
+	RecordType     string   `json:"record_type"`
+	CallID         string   `json:"call_id"`
+	At             string   `json:"at"`
+	TenantID       string   `json:"tenant_id"`
+	TaskID         *string  `json:"task_id"`
+	AgentID        *string  `json:"agent_id"`
+	Provider       string   `json:"provider"`
+	Model          string   `json:"model"`
+	RequestedModel string   `json:"requested_model"`
+	Mode           string   `json:"mode"`
+	ProfileID      string   `json:"profile_id"`
+	PromptVersion  string   `json:"prompt_version"`
+	InputSHA256    string   `json:"input_sha256"`
+	InputTokens    int      `json:"input_tokens"`
+	OutputTokens   int      `json:"output_tokens"`
+	CostUSD        float64  `json:"cost_usd"`
+	LatencyMS      float64  `json:"latency_ms"`
+	Status         string   `json:"status"`
+	ErrorType      *string  `json:"error_type"`
+	FinishReason   *string  `json:"finish_reason"`
+	DataClass      *string  `json:"data_class"`
+	Masked         bool     `json:"masked"`
+	External       bool     `json:"external"`
+	Attempt        int      `json:"attempt"`
+	RoutingReasons []string `json:"routing_reasons"`
+	// tool_call
+	Tool               string  `json:"tool"`
+	Kind               *string `json:"kind"`
+	Reason             *string `json:"reason"`
+	ParamsSHA256       string  `json:"params_sha256"`
+	ResponseBytes      int     `json:"response_bytes"`
+	Truncated          bool    `json:"truncated"`
+	SuspectedInjection bool    `json:"suspected_injection"`
+}
+
+var shaRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// recordAICalls — POST /api/v1/audit/ai-calls: оркестратор передаёт записи о вызовах LLM и инструментов,
+// ядро вписывает их в hash chain tenant (§6.3: провайдер, модель, режим, prompt_version, хэш входа, токены, стоимость).
+func (s *Server) recordAICalls(w http.ResponseWriter, r *http.Request, a identity.Actor) {
+	if a.Kind != identity.KindService || a.ID != "orchestrator" {
+		s.fail(w, r, problem.New(problem.Forbidden, "only the AI orchestrator service records AI calls"))
+		return
+	}
+	var b struct {
+		Records []aiCallRecord `json:"records"`
+	}
+	if err := decode(r, &b); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if len(b.Records) == 0 || len(b.Records) > 200 {
+		s.fail(w, r, problem.New(problem.InvalidParams, "records: 1..200 per request"))
+		return
+	}
+	for i, rec := range b.Records {
+		if rec.TenantID != a.TenantID {
+			s.fail(w, r, problem.New(problem.Forbidden, "records[%d]: tenant does not match the caller", i))
+			return
+		}
+		switch rec.RecordType {
+		case "llm_call":
+			if !shaRe.MatchString(rec.InputSHA256) || rec.Provider == "" || rec.Model == "" {
+				s.fail(w, r, problem.New(problem.InvalidParams, "records[%d]: llm_call requires provider, model, input_sha256", i))
+				return
+			}
+		case "tool_call":
+			if !shaRe.MatchString(rec.ParamsSHA256) || rec.Tool == "" {
+				s.fail(w, r, problem.New(problem.InvalidParams, "records[%d]: tool_call requires tool and params_sha256", i))
+				return
+			}
+		default:
+			s.fail(w, r, problem.New(problem.InvalidParams, "records[%d]: record_type must be llm_call or tool_call", i))
+			return
+		}
+	}
+	for _, rec := range b.Records {
+		raw, _ := json.Marshal(rec)
+		var data map[string]any
+		_ = json.Unmarshal(raw, &data)
+		for k, v := range data { // компактная запись: без пустых значений
+			if v == nil || v == "" || v == false || v == float64(0) {
+				delete(data, k)
+			}
+		}
+		delete(data, "tenant_id")
+		actor := "service:orchestrator"
+		if rec.AgentID != nil && *rec.AgentID != "" {
+			actor = "ai_agent:" + *rec.AgentID
+		}
+		action, obj := "ai.llm_call", "llm_call"
+		if rec.RecordType == "tool_call" {
+			action, obj = "ai.tool_call", "tool_call"
+		}
+		if _, err := s.Audit.Append(audit.Record{TenantID: a.TenantID, Actor: actor, Action: action, ObjectType: obj, ObjectID: rec.CallID, Data: data}); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"accepted": len(b.Records)})
 }

@@ -83,7 +83,15 @@ LINKED=$(curl -sf "${ENG[@]}" "$CORE/api/v1/incidents/$INC" | json "any('$CH' in
 [ "$LINKED" = "True" ] || fail "change not linked in incident timeline"
 echo "PASS change $CH verified and closed; container running; linked to incident"
 
-INTEG=$(curl -sf "${U[@]}" -H "X-AdminTwin-Actor: aud-1" -H "X-AdminTwin-Roles: auditor" "$CORE/api/v1/audit-logs/integrity" | json "d['valid']")
+AUD=(-H "X-AdminTwin-Tenant: $T" -H "X-AdminTwin-Actor: aud-1" -H "X-AdminTwin-Roles: auditor")
+for i in $(seq 1 20); do  # оркестратор отправляет записи пакетами раз в ~2 с
+  LLM=$(curl -sf "${AUD[@]}" "$CORE/api/v1/audit-logs" | json "[e for e in d['items'] if e['action']=='ai.llm_call']")
+  [ "$LLM" != "[]" ] && break; sleep 0.5
+done
+PM=$(echo "$LLM" | "$PY" -c "import ast,sys; e=ast.literal_eval(sys.stdin.read())[0]; print(e['data'].get('provider'), e['data'].get('model'), e['data'].get('prompt_version'), len(e['data'].get('input_sha256','')), e['actor'])")
+case "$PM" in *" 64 ai_agent:"*) ;; *) fail "LLM calls not in core audit with provider/model: $PM";; esac
+echo "PASS LLM calls in core audit chain (provider model prompt_version hash actor: $PM)"
+INTEG=$(curl -sf "${AUD[@]}" "$CORE/api/v1/audit-logs/integrity" | json "d['valid']")
 [ "$INTEG" = "True" ] || fail "audit chain invalid"
 echo "PASS audit hash chain valid"
 

@@ -26,6 +26,7 @@ from admintwin_ai.orchestrator.engine import Orchestrator
 from admintwin_ai.profiles import ModelProfile, Pricing, ProfileRegistry
 from admintwin_ai.providers.base import LLMProvider
 from admintwin_ai.routing.router import Router, TenantAIPolicy
+from admintwin_ai.service.core_audit import CoreAuditSink
 from admintwin_ai.service.settings import ConfigurationError, ServiceSettings
 from admintwin_ai.tools import ChangeProposeHandler, ToolInvoker, build_tool_registry
 from admintwin_ai.tools.http_backend import HttpReadBackend
@@ -139,10 +140,16 @@ def build_runtime(settings: ServiceSettings, *,
             log.warning("ADMINTWIN_AI_CONFIG is not set: no LLM providers; agent tasks will be "
                         "blocked (monitoring is unaffected)")
     router = Router(registry)
-    costs = CostTrackingSink(audit or LoggingAuditSink())
+    http = core_http or httpx.Client(timeout=20.0)
+    if audit is None:
+        audit = LoggingAuditSink()
+        if settings.service_token and settings.core_url and settings.audit_to_core:
+            # Метаданные вызовов LLM/инструментов — в неизменяемый аудит ядра (§6.3, §21);
+            # тот же HTTP-клиент ядра, что и у инструментов.
+            audit = CoreAuditSink(settings.core_url, settings.service_token, audit, client=http)
+    costs = CostTrackingSink(audit)
     ledger = ledger or BudgetLedger()
     gateway = AIGateway(registry, router, ledger, costs)
-    http = core_http or httpx.Client(timeout=20.0)
     read_backend = backend or HttpReadBackend(settings.core_url,
                                               service_token=settings.service_token, client=http)
     propose = ChangeProposeHandler(settings.core_url, client=http,

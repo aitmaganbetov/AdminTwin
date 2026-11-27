@@ -174,3 +174,14 @@ func (k PGKeys) unwrap(tenantID string, w []byte) ([]byte, error) {
 	}
 	return g.Open(nil, w[:g.NonceSize()], w[g.NonceSize():], []byte("pii-dek:"+tenantID))
 }
+
+// SaveCheckpoint сохраняет подписанный checkpoint (копия в MinIO Object Lock — адаптер объектного хранилища).
+func (s PGStore) SaveCheckpoint(cp Checkpoint) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return s.DB.WithTenant(ctx, cp.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO audit_chain_checkpoints (tenant_id, seq, hash, signature, at) VALUES ($1,$2,$3,$4,$5)
+			ON CONFLICT (tenant_id, seq) DO NOTHING`, cp.TenantID, int64(cp.Seq), cp.Hash, cp.Signature, cp.At)
+		return err
+	})
+}

@@ -69,6 +69,7 @@ type ChangeRequest struct {
 	Transitions    []fsm.Transition    `json:"transitions"`
 	PIRRequired    bool                `json:"pir_required"`
 	PIRDueAt       *time.Time          `json:"pir_due_at,omitempty"`
+	PIR            *PIR                `json:"pir,omitempty"`
 	CreatedAt      time.Time           `json:"created_at"`
 	UpdatedAt      time.Time           `json:"updated_at"`
 
@@ -535,6 +536,60 @@ func lastFailure(r gateway.Result) string {
 		}
 	}
 	return string(r.Status)
+}
+
+// PIR — post-implementation review.
+type PIR struct {
+	Summary           string    `json:"summary"`
+	Findings          string    `json:"findings,omitempty"`
+	CorrectiveActions []string  `json:"corrective_actions,omitempty"`
+	ReviewedBy        string    `json:"reviewed_by"`
+	ReviewedAt        time.Time `json:"reviewed_at"`
+	Overdue           bool      `json:"overdue"`
+}
+
+// RecordPIR фиксирует PIR для завершённого изменения. Ревьюер не может быть автором.
+func (c *Coordinator) RecordPIR(actor identity.Actor, changeID string, p PIR) (*ChangeRequest, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cr, ok := c.changes[changeID]
+	if !ok || cr.TenantID != actor.TenantID {
+		return nil, problem.New(problem.NotFound, "change not found")
+	}
+	if !Terminal(cr.Status) && cr.Status != ManualReview {
+		return nil, problem.New(problem.Conflict, "PIR is recorded after the change has finished (state %s)", cr.Status)
+	}
+	if cr.AuthorID == actor.ID {
+		return nil, problem.New(problem.SeparationOfDuties, "the author of a change cannot review it")
+	}
+	if cr.PIR != nil {
+		return nil, problem.New(problem.Conflict, "PIR already recorded")
+	}
+	now := c.now()
+	p.ReviewedBy, p.ReviewedAt = actor.Ref(), now
+	p.Overdue = cr.PIRDueAt != nil && now.After(*cr.PIRDueAt)
+	cr.PIR = &p
+	c.touch(cr)
+	c.audit(cr, actor.Ref(), "change.pir_recorded", map[string]any{"overdue": p.Overdue, "corrective_actions": len(p.CorrectiveActions)})
+	if cr.Status == ManualReview {
+		next := Closed
+		if len(cr.Executions) > 0 {
+			next = ClosedWithCompensation
+		}
+		c.transition(cr, next, actor.Ref(), "manual review completed with PIR")
+	}
+	return cr.snapshot(), nil
+}
+
+// StatusCounts — число изменений по статусам (meta-monitoring, без разбивки по tenant).
+func (c *Coordinator) StatusCounts() map[string]int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := map[string]int{}
+	for _, cr := range c.changes {
+		out[string(cr.Status)]++
+	}
+	return out
 }
 
 // Wait ожидает завершения всех асинхронных исполнений (тесты, graceful shutdown).

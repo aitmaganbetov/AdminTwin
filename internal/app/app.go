@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/aitmaganbetov/admintwin/pkg/db"
 	"github.com/aitmaganbetov/admintwin/pkg/httpapi"
 	"github.com/aitmaganbetov/admintwin/pkg/killswitch"
+	"github.com/aitmaganbetov/admintwin/pkg/metrics"
 	"github.com/aitmaganbetov/admintwin/pkg/oidc"
 	api "github.com/aitmaganbetov/admintwin/services/api-gateway"
 	"github.com/aitmaganbetov/admintwin/services/audit"
@@ -52,9 +55,11 @@ type Config struct {
 	AuditSigningKey string
 	// PIIMasterKey — base64 KEK (32 байта) для обёртки ключей ПДн tenant (crypto-shredding).
 	PIIMasterKey string
-	Simulator    bool
-	Version      string
-	Logger       *slog.Logger
+	// OrchestratorURL — AI-оркестратор (admintwin-orchestrator); пусто — AI-задачи недоступны.
+	OrchestratorURL string
+	Simulator       bool
+	Version         string
+	Logger          *slog.Logger
 }
 
 // App — собранное ядро.
@@ -64,14 +69,20 @@ type App struct {
 	Inventory   inventory.Repository
 	DB          *db.DB
 	Tools       *toolsvc.Service
-	Registry    *registry.Registry
-	Audit       *audit.Log
-	AuditPub    ed25519.PublicKey
-	Kill        *killswitch.Switch
-	Sim         *sim.Infra
-	Evidence    evidence.Repository
-	tenantsMu   sync.RWMutex
-	tenants     map[string]policy.TenantPolicy
+	Metrics     *metrics.Registry
+	// auditState — результат последней фоновой верификации цепочек.
+	auditMu    sync.Mutex
+	auditValid map[string]bool
+	// Orchestrator — прокси к AI-оркестратору (nil, если не настроен).
+	Orchestrator *api.OrchestratorProxy
+	Registry     *registry.Registry
+	Audit        *audit.Log
+	AuditPub     ed25519.PublicKey
+	Kill         *killswitch.Switch
+	Sim          *sim.Infra
+	Evidence     evidence.Repository
+	tenantsMu    sync.RWMutex
+	tenants      map[string]policy.TenantPolicy
 }
 
 // Tenant возвращает политику tenant.
@@ -267,6 +278,39 @@ func New(cfg Config) (*App, error) {
 		Version: cfg.Version, Simulator: cfg.Simulator,
 		Modules: []httpapi.Module{a.Tools},
 	}
+	a.Metrics = metrics.New()
+	a.Metrics.Help("admintwin_http_requests_total", "HTTP requests by route template and status")
+	a.Metrics.Help("admintwin_changes", "Change requests in memory by status")
+	a.Metrics.Help("admintwin_audit_chain_valid", "1 if the last verification of the tenant audit hash chain succeeded")
+	a.Metrics.GaugeFunc(a.gauges)
+	a.Server.Metrics = a.Metrics
+	a.Server.SaveTenant = a.SaveTenant
+	if a.DB != nil {
+		a.Server.Checks = append(a.Server.Checks, api.HealthCheck{Name: "postgresql", Critical: true, Check: func(ctx context.Context) error { return a.DB.Pool.Ping(ctx) }})
+	}
+	if cfg.OrchestratorURL != "" {
+		url := strings.TrimRight(cfg.OrchestratorURL, "/") + "/healthz"
+		a.Server.Checks = append(a.Server.Checks, api.HealthCheck{Name: "ai_orchestrator", Check: func(ctx context.Context) error {
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			req.Header.Set("X-AdminTwin-Service-Token", cfg.ServiceToken)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return err
+			}
+			resp.Body.Close()
+			if resp.StatusCode != 200 {
+				return fmt.Errorf("status %d", resp.StatusCode)
+			}
+			return nil
+		}})
+	}
+	if cfg.OrchestratorURL != "" {
+		a.Orchestrator = &api.OrchestratorProxy{BaseURL: cfg.OrchestratorURL, ServiceToken: cfg.ServiceToken}
+		a.Server.Modules = append(a.Server.Modules, a.Orchestrator)
+		a.Kill.OnActivate(func(tenantID string, platform bool) { go a.Orchestrator.Kill(tenantID, platform) })
+	} else {
+		a.Server.Modules = append(a.Server.Modules, &api.OrchestratorProxy{}) // 404 «не настроен», а не 404 маршрута
+	}
 	return a, nil
 }
 
@@ -339,4 +383,89 @@ func signingKey(cfg Config) (ed25519.PrivateKey, error) {
 	}
 	_, priv, gerr := ed25519.GenerateKey(rand.Reader)
 	return priv, gerr
+}
+
+func (a *App) gauges() []metrics.Gauge {
+	var out []metrics.Gauge
+	for st, n := range a.Coordinator.StatusCounts() {
+		out = append(out, metrics.Gauge{Name: "admintwin_changes", Labels: map[string]string{"status": st}, Value: float64(n)})
+	}
+	_, plat := a.Kill.Status("")
+	out = append(out, metrics.Gauge{Name: "admintwin_kill_switch_active", Labels: map[string]string{"scope": "platform"}, Value: b2f(plat.Active)})
+	a.tenantsMu.RLock()
+	tenants := make([]string, 0, len(a.tenants))
+	for t := range a.tenants {
+		tenants = append(tenants, t)
+	}
+	a.tenantsMu.RUnlock()
+	active := 0
+	for _, t := range tenants {
+		if a.Kill.Active(t) {
+			active++
+		}
+	}
+	out = append(out, metrics.Gauge{Name: "admintwin_kill_switch_active", Labels: map[string]string{"scope": "tenant"}, Value: float64(active)})
+	a.auditMu.Lock()
+	for t, ok := range a.auditValid {
+		// tenant_id — ограниченное число tenant; для SaaS с тысячами tenant метка заменяется агрегатом.
+		out = append(out, metrics.Gauge{Name: "admintwin_audit_chain_valid", Labels: map[string]string{"tenant_id": t}, Value: b2f(ok)})
+	}
+	a.auditMu.Unlock()
+	return out
+}
+
+func b2f(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// RunBackground — периодические задачи ядра до отмены ctx:
+// запуск изменений, дождавшихся maintenance window; верификация hash chain и подписанный checkpoint.
+func (a *App) RunBackground(ctx context.Context, tick, auditEvery time.Duration) {
+	t := time.NewTicker(tick)
+	defer t.Stop()
+	au := time.NewTicker(auditEvery)
+	defer au.Stop()
+	a.VerifyAudit()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			a.Coordinator.Tick()
+		case <-au.C:
+			a.VerifyAudit()
+		}
+	}
+}
+
+// VerifyAudit проверяет цепочки всех tenant и сохраняет подписанные checkpoint'ы.
+func (a *App) VerifyAudit() {
+	a.tenantsMu.RLock()
+	tenants := make([]string, 0, len(a.tenants))
+	for t := range a.tenants {
+		tenants = append(tenants, t)
+	}
+	a.tenantsMu.RUnlock()
+	for _, t := range tenants {
+		ok, at, err := a.Audit.VerifyTenant(t)
+		if !ok {
+			slog.Error("AUDIT CHAIN INTEGRITY FAILURE", "tenant", t, "broken_at_seq", at, "error", err)
+		}
+		a.auditMu.Lock()
+		if a.auditValid == nil {
+			a.auditValid = map[string]bool{}
+		}
+		a.auditValid[t] = ok
+		a.auditMu.Unlock()
+		if ok && a.DB != nil {
+			if cp, err := a.Audit.Checkpoint(t); err == nil && cp.Seq > 0 {
+				if err := (audit.PGStore{DB: a.DB}).SaveCheckpoint(cp); err != nil {
+					slog.Error("audit checkpoint not saved", "tenant", t, "error", err)
+				}
+			}
+		}
+	}
 }
